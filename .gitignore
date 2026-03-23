@@ -1,0 +1,116 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+*.env
+*.secret
+*.secrets
+*.token
+*.tokens
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Session/Auth state
+auth/*
+!auth/.gitkeep
+cookies/*
+!cookies/.gitkeep
+TK_cookies*.json
+youtube_cookies.json
+.pinterest_profile/
+*_cookies.json
+*storage-state*.json
+oauth*.json
+token*.json
+credentials*.json
+grok-storage.json
+grok-session-cookies.json
+grok-storage-state.json
+grok-chrome-profile*/
+grok-probe-profile*/
+playwright/.auth/
+
+# Generated output
+output/*
+!output/.gitkeep
+downloads/*
+!downloads/.gitkeep
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Posted content tracking (contains your specific content)
+CURRENT_POSTED_VIDEOS.md
+INSTAGRAM_POSTED_VIDEOS.md
+INSTAGRAM_POSTED_AI_VIDEOS.md
+X_POSTED_VIDEOS.md
+X_POSTED_AI_VIDEOS.md
+REDDIT_POSTED_VIDEOS.md
+TIKTOK_POSTED_AI_VIDEOS.md
+PINTEREST_POSTED_VIDEOS.md
+YOUTUBE_POSTED_VIDEOS.md
+AI_VIDEOS.md
+V3_SLIDESHOWS_POSTED.md
+
+# LaunchD plists (contain local paths)
+*.plist
+
+# Generated media exports
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.ass
+
+# Inspiration/reference content
+inspiration/
+iterations/
+data-sources/
+tracking/
+
+# Firebase service account
+*-firebase-adminsdk-*.json
+service-account.json
+
+# Fonts (may be copyrighted)
+fonts/*.ttf
+fonts/*.otf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp
+tmp-*.mjs
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Shell scripts with hardcoded paths
+run_*.sh
+
+# Templates
+prompts/video-templates.json
+prompts/carousel-templates.json

@@ -1,0 +1,7 @@
+# Browser-cookie auth and posting automation
+zendriver
+tiktokautouploader
+browser-cookie3
+
+# Audio transcription
+faster-whisper

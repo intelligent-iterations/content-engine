@@ -1,0 +1,943 @@
+#!/usr/bin/env node
+
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { chromium } from 'playwright';
+import { TEMP_DIR } from '../core/paths.js';
+import {
+  applyCookiesFileToContext,
+  applyStorageStateToContext,
+  isChromeProfileLockError,
+  makeTempChromeProfileDir,
+  parseCookieFile
+} from '../shared/grok-browser-session.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
+const DEFAULT_STATE_PATH = path.join(PROJECT_ROOT, 'auth', 'grok-storage-state.json');
+const DEFAULT_DOWNLOAD_DIR = path.join(TEMP_DIR, 'grok-images');
+const DEFAULT_USER_DATA_DIR = path.join(PROJECT_ROOT, 'auth', 'grok-chrome-profile');
+const DEFAULT_TIMEOUT_MS = 8 * 60 * 1000;
+const DEFAULT_RATE_LIMIT_WAIT_MS = 60000;
+const DEFAULT_MAX_RATE_LIMIT_RETRIES = 3;
+const GROK_URL = 'https://grok.com/imagine';
+const DEFAULT_COOKIE_PATH_CANDIDATES = [
+  path.join(PROJECT_ROOT, 'cookies', 'x_cookies.json')
+];
+
+const PROMPT_SELECTOR_CANDIDATES = [
+  'textarea[aria-label="Make an image"]',
+  'textarea[aria-label="Imagine"]',
+  'textarea[name*="prompt"]',
+  'textarea[placeholder*="customize" i]',
+  'textarea[placeholder*="image" i]',
+  'div[role="textbox"][contenteditable="true"]',
+  'div[role="textbox"]',
+  '[contenteditable="true"]',
+  'textarea'
+];
+
+const IMAGE_SELECTOR_CANDIDATES = [
+  'main img',
+  'img[src*="imagine-public.x.ai"]',
+  'img[src*="/media/"]',
+  'img'
+];
+
+const ACTION_BUTTON_SELECTOR_CANDIDATES = [
+  'button[aria-label="Submit"]',
+  'button[aria-label="Make image"]',
+  'button[aria-label="Redo"]',
+  'button[type="submit"]'
+];
+
+function printUsage() {
+  console.log(`
+Usage:
+  node code/image/grok-image-automation.js --save-login
+  node code/image/grok-image-automation.js --prompt "your prompt here"
+
+Options:
+  --prompt <text>            Prompt to submit to Grok
+  --save-login               Open a headed browser and save login state
+  --state <path>             Playwright storage state path
+  --cookies <path>           Import cookies JSON before running
+  --out-dir <path>           Directory for downloaded images
+  --user-data-dir <path>     Persistent Chrome profile directory
+  --timeout-ms <number>      Max wait time for image generation
+  --headed                   Run with visible browser
+  --debug                    Extra logging
+  --help                     Show this help
+
+Examples:
+  node code/image/grok-image-automation.js --save-login --headed
+  node code/image/grok-image-automation.js --prompt "A cinematic perfume bottle on mirrored black glass"
+  node code/image/grok-image-automation.js --prompt "Retro claymation coffee ad key visual" --cookies ./grok-cookies.json
+`.trim());
+}
+
+function parseArgs(argv) {
+  const args = {
+    statePath: DEFAULT_STATE_PATH,
+    outDir: DEFAULT_DOWNLOAD_DIR,
+    userDataDir: DEFAULT_USER_DATA_DIR,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    rateLimitWaitMs: DEFAULT_RATE_LIMIT_WAIT_MS,
+    maxRateLimitRetries: DEFAULT_MAX_RATE_LIMIT_RETRIES,
+    headed: false,
+    debug: false,
+    saveLogin: false,
+    cookiesPath: null,
+    prompt: null
+  };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+
+    if (arg === '--help') {
+      args.help = true;
+    } else if (arg === '--save-login') {
+      args.saveLogin = true;
+    } else if (arg === '--headed') {
+      args.headed = true;
+    } else if (arg === '--debug') {
+      args.debug = true;
+    } else if (arg === '--prompt') {
+      args.prompt = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith('--prompt=')) {
+      args.prompt = arg.slice('--prompt='.length);
+    } else if (arg === '--state') {
+      args.statePath = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith('--state=')) {
+      args.statePath = arg.slice('--state='.length);
+    } else if (arg === '--cookies') {
+      args.cookiesPath = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith('--cookies=')) {
+      args.cookiesPath = arg.slice('--cookies='.length);
+    } else if (arg === '--out-dir') {
+      args.outDir = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith('--out-dir=')) {
+      args.outDir = arg.slice('--out-dir='.length);
+    } else if (arg === '--user-data-dir') {
+      args.userDataDir = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith('--user-data-dir=')) {
+      args.userDataDir = arg.slice('--user-data-dir='.length);
+    } else if (arg === '--timeout-ms') {
+      args.timeoutMs = Number(argv[i + 1]);
+      i += 1;
+    } else if (arg.startsWith('--timeout-ms=')) {
+      args.timeoutMs = Number(arg.slice('--timeout-ms='.length));
+    } else if (arg === '--rate-limit-wait-ms') {
+      args.rateLimitWaitMs = Number(argv[i + 1]);
+      i += 1;
+    } else if (arg.startsWith('--rate-limit-wait-ms=')) {
+      args.rateLimitWaitMs = Number(arg.slice('--rate-limit-wait-ms='.length));
+    } else if (arg === '--max-rate-limit-retries') {
+      args.maxRateLimitRetries = Number(argv[i + 1]);
+      i += 1;
+    } else if (arg.startsWith('--max-rate-limit-retries=')) {
+      args.maxRateLimitRetries = Number(arg.slice('--max-rate-limit-retries='.length));
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  if (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0) {
+    throw new Error('--timeout-ms must be a positive number');
+  }
+
+  if (!Number.isFinite(args.rateLimitWaitMs) || args.rateLimitWaitMs <= 0) {
+    throw new Error('--rate-limit-wait-ms must be a positive number');
+  }
+
+  if (!Number.isInteger(args.maxRateLimitRetries) || args.maxRateLimitRetries < 0) {
+    throw new Error('--max-rate-limit-retries must be a non-negative integer');
+  }
+
+  return args;
+}
+
+function ensureDir(dirPath) {
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function logDebug(enabled, message) {
+  if (enabled) {
+    console.log(`[debug] ${message}`);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sanitizeFileName(input) {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'grok-image';
+}
+
+function normalizePromptText(input) {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveCookiePath(providedPath) {
+  if (providedPath) {
+    return providedPath;
+  }
+
+  return DEFAULT_COOKIE_PATH_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+async function applyCookiesToContext(context, args) {
+  await applyStorageStateToContext(context, args.statePath);
+  await applyCookiesFileToContext(context, resolveCookiePath(args.cookiesPath));
+}
+
+async function launchPersistentChrome(args) {
+  ensureDir(args.outDir);
+  const userDataDir = args.preferFreshProfile
+    ? makeTempChromeProfileDir('grok-image-run-')
+    : args.userDataDir;
+
+  ensureDir(userDataDir);
+  const launchOptions = {
+    headless: !args.headed,
+    channel: 'chrome',
+    acceptDownloads: true,
+    downloadsPath: args.outDir,
+    viewport: { width: 1440, height: 1080 },
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  };
+
+  try {
+    return await chromium.launchPersistentContext(userDataDir, launchOptions);
+  } catch (error) {
+    if (!isChromeProfileLockError(error)) {
+      throw error;
+    }
+
+    const fallbackDir = makeTempChromeProfileDir('grok-image-');
+    console.warn(`Profile locked at ${userDataDir}. Retrying with temp profile ${fallbackDir}`);
+    return chromium.launchPersistentContext(fallbackDir, launchOptions);
+  }
+}
+
+async function saveLoginState(args) {
+  ensureDir(path.dirname(args.statePath));
+  const context = await launchPersistentChrome({ ...args, headed: true });
+  await applyCookiesToContext(context, args);
+  const page = context.pages()[0] || await context.newPage();
+
+  try {
+    await page.goto(GROK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    console.log('Log into Grok in the opened browser window.');
+    console.log('After the Grok Imagine page is visibly logged in, press Enter here to save the session.');
+    process.stdin.resume();
+    await new Promise(resolve => process.stdin.once('data', resolve));
+    await context.storageState({ path: args.statePath });
+    console.log(`Saved login state to ${args.statePath}`);
+  } finally {
+    await context.close();
+  }
+}
+
+async function dismissInterruptions(page, debug) {
+  const labels = [
+    /accept/i,
+    /allow all/i,
+    /continue/i,
+    /not now/i,
+    /close/i,
+    /got it/i,
+    /skip/i
+  ];
+
+  for (const label of labels) {
+    const button = page.getByRole('button', { name: label }).first();
+    try {
+      if (await button.isVisible({ timeout: 750 })) {
+        logDebug(debug, `Clicked interruption button ${label}`);
+        await button.click();
+        await page.waitForTimeout(400);
+      }
+    } catch {
+      // Ignore overlays that disappear mid-click.
+    }
+  }
+}
+
+async function waitForEditorToHydrate(page, debug) {
+  const editorSelector = '[contenteditable="true"].ProseMirror';
+
+  await page.waitForFunction((selector) => {
+    const element = document.querySelector(selector);
+    if (!element) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  }, editorSelector, { timeout: 30000 });
+
+  logDebug(debug, 'Editor hydrated');
+}
+
+async function ensureImageMode(page, debug) {
+  const resolveModeButton = async (label) => {
+    const candidates = [
+      page.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }).first(),
+      page.locator('button').filter({ hasText: new RegExp(`^${label}$`, 'i') }).first(),
+      page.locator(`button:has-text("${label}")`).first()
+    ];
+
+    for (const candidate of candidates) {
+      try {
+        await candidate.waitFor({ state: 'visible', timeout: 1500 });
+        return candidate;
+      } catch {
+        // Try next candidate.
+      }
+    }
+
+    return null;
+  };
+
+  const imageButton = await resolveModeButton('Image');
+  const videoButton = await resolveModeButton('Video');
+
+  if (!imageButton) {
+    logDebug(debug, 'Image mode button not found; keeping current mode');
+    return;
+  }
+
+  const imageClass = await imageButton.getAttribute('class').catch(() => '');
+  if (imageClass && /text-primary/.test(imageClass) && !/text-secondary/.test(imageClass)) {
+    logDebug(debug, 'Image mode already active');
+    return;
+  }
+
+  if (videoButton) {
+    const videoClass = await videoButton.getAttribute('class').catch(() => '');
+    logDebug(debug, `Current mode button classes: image=${imageClass || 'n/a'} video=${videoClass || 'n/a'}`);
+  }
+
+  await imageButton.click({ force: true });
+  await page.waitForTimeout(800);
+
+  const nextClass = await imageButton.getAttribute('class').catch(() => '');
+  logDebug(debug, `Switched to Image mode; class=${nextClass || 'n/a'}`);
+}
+
+async function assertLoggedIn(page) {
+  const href = page.url();
+  if (/\/i\/flow\/login|\/login\b/i.test(href)) {
+    throw new Error('Not logged in to Grok. Save a storage state first with --save-login or provide valid cookies.');
+  }
+
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const lowered = bodyText.toLowerCase();
+  const hasLoginWall = lowered.includes('sign in to grok') || lowered.includes('log in to grok') || lowered.includes('continue with google');
+
+  if (hasLoginWall) {
+    throw new Error('Not logged in to Grok. Save a storage state first with --save-login or provide valid cookies.');
+  }
+}
+
+async function findVisiblePromptLocator(page) {
+  const hydratedEditor = page.locator('[contenteditable="true"].ProseMirror').filter({ visible: true }).first();
+  try {
+    await hydratedEditor.waitFor({ state: 'visible', timeout: 1500 });
+    return hydratedEditor;
+  } catch {
+    // Fall through to legacy selectors.
+  }
+
+  for (const selector of PROMPT_SELECTOR_CANDIDATES) {
+    const locator = page.locator(selector).filter({ visible: true }).first();
+    try {
+      await locator.waitFor({ state: 'visible', timeout: 1500 });
+      return locator;
+    } catch {
+      // Try next selector.
+    }
+  }
+
+  throw new Error('Could not find the Grok image prompt input');
+}
+
+async function fillPrompt(locator, prompt, debug) {
+  const tagName = await locator.evaluate((el) => el.tagName.toLowerCase());
+  const isContentEditable = await locator.evaluate((el) => el.isContentEditable);
+
+  await locator.click({ force: true });
+
+  if (tagName === 'textarea' || tagName === 'input') {
+    await locator.fill('');
+    await locator.fill(prompt);
+    logDebug(debug, 'Filled textarea/input prompt');
+    return;
+  }
+
+  if (isContentEditable) {
+    await locator.evaluate((el, value) => {
+      el.focus();
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      document.execCommand('insertText', false, value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, prompt);
+    logDebug(debug, 'Filled contenteditable prompt');
+    return;
+  }
+
+  throw new Error('Unsupported prompt input type');
+}
+
+async function findActionButton(page) {
+  for (const selector of ACTION_BUTTON_SELECTOR_CANDIDATES) {
+    const button = page.locator(selector).filter({ visible: true }).first();
+    try {
+      if (await button.isVisible({ timeout: 500 })) {
+        return button;
+      }
+    } catch {
+      // Ignore.
+    }
+  }
+
+  const handle = await page.evaluateHandle(() => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const labels = ['make image', 'generate', 'create image', 'send', 'redo'];
+    return buttons.find((button) => {
+      if (button.closest('nav, aside, [role="navigation"]')) {
+        return false;
+      }
+      const label = (button.getAttribute('aria-label') || button.textContent || button.title || '').trim().toLowerCase();
+      const visible = button.offsetParent !== null;
+      return visible && labels.some((value) => label === value || label.includes(value));
+    }) || null;
+  });
+
+  const element = handle.asElement();
+  if (element) {
+    return element;
+  }
+
+  return null;
+}
+
+async function submitPrompt(page, promptLocator, debug) {
+  const button = await findActionButton(page);
+
+  if (button) {
+    try {
+      await button.waitForElementState?.('stable').catch(() => {});
+      const disabled = await button.isDisabled?.().catch(() => false);
+      if (disabled) {
+        throw new Error('Submit button is disabled');
+      }
+      await button.click({ force: true });
+      logDebug(debug, 'Submitted via action button');
+      return;
+    } catch {
+      // Fall through to Enter.
+    }
+  }
+
+  await promptLocator.press('Enter');
+  logDebug(debug, 'Submitted via Enter key');
+}
+
+async function detectErrorState(page) {
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const lowered = bodyText.toLowerCase();
+
+  if (lowered.includes('content moderated') || lowered.includes('try a different idea')) {
+    return 'Grok rejected the prompt due to moderation';
+  }
+
+  if (lowered.includes('rate limit reached') || lowered.includes('too many requests')) {
+    return 'Grok rate limit reached';
+  }
+
+  if (lowered.includes('something went wrong') || lowered.includes('generation failed')) {
+    return 'Grok reported a generation failure';
+  }
+
+  return null;
+}
+
+async function extractImageMetadata(page) {
+  return page.evaluate(() => {
+    const normalizeUrl = (value) => {
+      if (!value) return '';
+      if (value.startsWith('//')) return `${location.protocol}${value}`;
+      if (value.startsWith('/')) return `${location.origin}${value}`;
+      return value;
+    };
+
+    const metaSelectors = [
+      'meta[property="og:image"]',
+      'meta[name="twitter:image"]',
+      'meta[property="twitter:image"]'
+    ];
+
+    const metaUrls = metaSelectors
+      .map((selector) => document.querySelector(selector)?.getAttribute('content') || '')
+      .map(normalizeUrl)
+      .filter(Boolean);
+
+    const imageUrls = Array.from(document.querySelectorAll('img'))
+      .map((img) => ({
+        src: normalizeUrl(img.currentSrc || img.src || ''),
+        width: img.naturalWidth || img.width || 0,
+        height: img.naturalHeight || img.height || 0
+      }))
+      .filter((img) => img.src)
+      .sort((a, b) => (b.width * b.height) - (a.width * a.height));
+
+    const downloadLinks = Array.from(document.querySelectorAll('a[href], a[download]'))
+      .map((link) => ({
+        href: normalizeUrl(link.getAttribute('href') || ''),
+        text: (link.textContent || link.getAttribute('aria-label') || '').trim()
+      }))
+      .filter((link) => link.href);
+
+    return {
+      currentUrl: location.href,
+      metaUrls,
+      imageUrls,
+      downloadLinks
+    };
+  });
+}
+
+function chooseDirectImageUrl(metadata) {
+  const preferred = [
+    ...metadata.downloadLinks
+      .filter((link) => /download|save/i.test(link.text) || /\.(png|jpe?g|webp)(\?|$)/i.test(link.href))
+      .map((link) => link.href),
+    ...metadata.imageUrls.map((img) => img.src),
+    ...metadata.metaUrls
+  ];
+
+  return preferred.find((url) => (
+    /^data:image\//i.test(url)
+    || (/^https?:/i.test(url) && (
+      url.includes('imagine-public.x.ai')
+      || url.includes('/media/')
+      || /\.(png|jpe?g|webp)(\?|$)/i.test(url)
+    ))
+  )) || null;
+}
+
+function collectKnownMediaUrls(metadata) {
+  return new Set([
+    ...(metadata?.metaUrls || []),
+    ...((metadata?.imageUrls || []).map((img) => img.src)),
+    ...((metadata?.downloadLinks || []).map((link) => link.href))
+  ].filter(Boolean));
+}
+
+async function collectKnownPublicAssetUrls(page) {
+  return page.evaluate(() => {
+    const urls = new Set();
+    const normalize = (value) => {
+      if (!value) return '';
+      if (value.startsWith('//')) return `${location.protocol}${value}`;
+      if (value.startsWith('/')) return `${location.origin}${value}`;
+      return value;
+    };
+
+    for (const img of document.querySelectorAll('img')) {
+      const src = normalize(img.currentSrc || img.src || '');
+      if (/imagine-public\.x\.ai\/imagine-public\/(images|share-images)\//i.test(src)) {
+        urls.add(src);
+      }
+    }
+
+    for (const entry of performance.getEntriesByType('resource')) {
+      const name = normalize(entry.name || '');
+      if (/imagine-public\.x\.ai\/imagine-public\/(images|share-images)\//i.test(name)) {
+        urls.add(name);
+      }
+    }
+
+    return Array.from(urls);
+  });
+}
+
+async function resolvePromptSection(page, prompt, debug) {
+  const target = normalizePromptText(prompt);
+  const locator = page.locator('[id^="imagine-masonry-section-"]').filter({
+    has: page.locator('span')
+  });
+  const count = await locator.count().catch(() => 0);
+
+  for (let i = 0; i < count; i += 1) {
+    const section = locator.nth(i);
+    const text = normalizePromptText(await section.textContent().catch(() => ''));
+    if (text.includes(target)) {
+      logDebug(debug, `Matched prompt section ${i} for prompt "${prompt}"`);
+      return section;
+    }
+  }
+
+  logDebug(debug, `No exact prompt section match for "${prompt}", using latest section`);
+  return locator.first();
+}
+
+async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
+  const deadline = Date.now() + timeoutMs;
+  let sawProgress = false;
+  const knownUrls = collectKnownMediaUrls(initialMetadata);
+  const knownPublicAssetUrls = new Set(await collectKnownPublicAssetUrls(page).catch(() => []));
+  const dataUrlFallbackAt = Date.now() + Math.min(45000, Math.max(12000, Math.floor(timeoutMs / 3)));
+
+  while (Date.now() < deadline) {
+    await dismissInterruptions(page, debug);
+
+    const error = await detectErrorState(page);
+    if (error) {
+      throw new Error(error);
+    }
+
+    const publicAssetUrls = await collectKnownPublicAssetUrls(page).catch(() => []);
+    const newPublicAssetUrl = publicAssetUrls.find((url) => !knownPublicAssetUrls.has(url)) || null;
+    if (newPublicAssetUrl) {
+      logDebug(debug, `Public asset URL detected: ${newPublicAssetUrl}`);
+      return {
+        directUrl: newPublicAssetUrl,
+        metadata: await extractImageMetadata(page).catch(() => initialMetadata)
+      };
+    }
+
+    const metadata = await extractImageMetadata(page);
+    const directUrl = chooseDirectImageUrl({
+      ...metadata,
+      metaUrls: metadata.metaUrls.filter((url) => !knownUrls.has(url)),
+      imageUrls: metadata.imageUrls.filter((img) => !knownUrls.has(img.src)),
+      downloadLinks: metadata.downloadLinks.filter((link) => !knownUrls.has(link.href))
+    });
+
+    if (directUrl && (!/^data:image\//i.test(directUrl) || Date.now() >= dataUrlFallbackAt)) {
+      logDebug(debug, `Direct image URL detected: ${directUrl}`);
+      return { directUrl, metadata };
+    }
+
+    for (const selector of IMAGE_SELECTOR_CANDIDATES) {
+      const image = page.locator(selector).filter({ visible: true }).first();
+      try {
+        if (await image.isVisible({ timeout: 500 })) {
+          const src = await image.evaluate((node) => node.currentSrc || node.src || '');
+          const canUseDataUrl = /^data:image\//i.test(src) && Date.now() >= dataUrlFallbackAt;
+          if (src && !knownUrls.has(src) && (/^https?:/i.test(src) || canUseDataUrl)) {
+            logDebug(debug, `Image element source detected: ${src}`);
+            return { directUrl: src, metadata };
+          }
+        }
+      } catch {
+        // Ignore and continue polling.
+      }
+    }
+
+    const progressButton = page.locator('button[aria-label*="Options"]').first();
+    try {
+      if (await progressButton.isVisible({ timeout: 300 })) {
+        sawProgress = true;
+        const progressText = await progressButton.innerText().catch(() => '');
+        logDebug(debug, `Generation progress visible: ${progressText || 'Options'}`);
+      }
+    } catch {
+      // Ignore missing progress button.
+    }
+
+    if (metadata.currentUrl.includes('/imagine/post/')) {
+      logDebug(debug, `On imagine post route: ${metadata.currentUrl}`);
+    }
+
+    await page.waitForTimeout(sawProgress ? 2500 : 1500);
+  }
+
+  throw new Error(`Timed out waiting for image generation after ${Math.round(timeoutMs / 1000)}s`);
+}
+
+async function downloadViaButton(page, outputPath, debug, options = {}) {
+  const section = await resolvePromptSection(page, options.prompt, debug).catch(() => null);
+  if (!section) {
+    return null;
+  }
+
+  const saveButtons = section.locator('button[aria-label="Save"]');
+  const saveButtonCount = await saveButtons.count().catch(() => 0);
+  if (saveButtonCount < 1) {
+    logDebug(debug, 'No section-local Save buttons found');
+    return null;
+  }
+
+  const cardIndex = Math.min(options.cardIndex ?? 0, saveButtonCount - 1);
+  const knownPublicAssetUrls = new Set(await collectKnownPublicAssetUrls(page).catch(() => []));
+  logDebug(debug, `Trying section-local Save for card ${cardIndex}; known public assets=${knownPublicAssetUrls.size}`);
+
+  const downloadPromise = page.waitForEvent('download', { timeout: 12000 }).catch(() => null);
+  const publicAssetResponses = [];
+  const publicAssetHandler = (response) => {
+    const url = response.url();
+    if (
+      response.status() === 200
+      && /imagine-public\.x\.ai\/imagine-public\/(images|share-images)\/.+\.(png|jpe?g|webp)(\?|$)/i.test(url)
+      && !knownPublicAssetUrls.has(url)
+    ) {
+      publicAssetResponses.push(url);
+    }
+  };
+  page.on('response', publicAssetHandler);
+
+  const targetButton = saveButtons.nth(cardIndex);
+  try {
+    await targetButton.click({ force: true, timeout: 2000 });
+  } catch {
+    await page.evaluate((idx) => {
+      const sectionNode = document.querySelector('[id^="imagine-masonry-section-"]');
+      const sections = Array.from(document.querySelectorAll('[id^="imagine-masonry-section-"]'));
+      const sectionMatch = sections.find((node) => (node.textContent || '').toLowerCase().includes(window.__codexPromptTarget || '')) || sectionNode;
+      const button = sectionMatch?.querySelectorAll('button[aria-label="Save"]')?.[idx];
+      const card = button?.closest('.group\\/media-post-masonry-card');
+      if (card) {
+        card.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true, view: window }));
+        card.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+      }
+      if (button) {
+        button.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true, view: window }));
+        button.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+        button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+        button.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      }
+    }, cardIndex).catch(() => {});
+  }
+
+  await page.waitForTimeout(12000);
+  page.off('response', publicAssetHandler);
+
+  const download = await downloadPromise;
+  if (download) {
+    await download.saveAs(outputPath);
+    return { outputPath };
+  }
+
+  const directUrl = publicAssetResponses.at(-1) || null;
+  if (directUrl) {
+    logDebug(debug, `Captured post-save asset URL ${directUrl}`);
+    return { directUrl };
+  }
+
+  logDebug(debug, 'Section-local Save did not produce a new public asset response');
+
+  return null;
+}
+
+async function downloadViaBrowserNavigation(context, url, outputPath, debug) {
+  logDebug(debug, `Trying browser navigation download for ${url}`);
+  const page = await context.newPage();
+
+  try {
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 15000 }),
+      page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null)
+    ]);
+    await download.saveAs(outputPath);
+    return outputPath;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+async function downloadFromUrl(context, page, url, outputPath, debug) {
+  if (/^data:image\//i.test(url)) {
+    logDebug(debug, 'Saving image from in-page data URL');
+    const match = url.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (!match) {
+      throw new Error('Unsupported data URL format for image result');
+    }
+
+    fs.writeFileSync(outputPath, Buffer.from(match[2], 'base64'));
+    return outputPath;
+  }
+
+  logDebug(debug, `Downloading direct asset ${url}`);
+  const response = await context.request.get(url, {
+    timeout: 120000,
+    headers: {
+      referer: 'https://grok.com/',
+      origin: 'https://grok.com'
+    }
+  });
+
+  if (response.ok()) {
+    fs.writeFileSync(outputPath, Buffer.from(await response.body()));
+    return outputPath;
+  }
+
+  logDebug(debug, `Direct request returned ${response.status()}, falling back to page fetch`);
+
+  const fetched = await page.evaluate(async (assetUrl) => {
+    try {
+      const res = await fetch(assetUrl, {
+        credentials: 'include'
+      });
+
+      if (!res.ok) {
+        return { ok: false, status: res.status };
+      }
+
+      const blob = await res.blob();
+      const buffer = await blob.arrayBuffer();
+      const bytes = Array.from(new Uint8Array(buffer));
+      return { ok: true, bytes };
+    } catch (error) {
+      return {
+        ok: false,
+        status: -1,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }, url);
+
+  if (!fetched.ok) {
+    logDebug(debug, `Page fetch failed with status ${fetched.status}${fetched.error ? `: ${fetched.error}` : ''}`);
+    const browserDownload = await downloadViaBrowserNavigation(context, url, outputPath, debug).catch(() => null);
+    if (browserDownload) {
+      return browserDownload;
+    }
+    throw new Error(`Image download failed with status ${fetched.status}`);
+  }
+
+  fs.writeFileSync(outputPath, Buffer.from(fetched.bytes));
+  return outputPath;
+}
+
+function inferImageExtension(url) {
+  const normalized = String(url || '').toLowerCase();
+  if (normalized.startsWith('data:image/jpeg')) return 'jpg';
+  if (normalized.startsWith('data:image/jpg')) return 'jpg';
+  if (normalized.startsWith('data:image/png')) return 'png';
+  if (normalized.startsWith('data:image/webp')) return 'webp';
+  if (normalized.includes('.png')) return 'png';
+  if (normalized.includes('.webp')) return 'webp';
+  if (normalized.includes('.jpg') || normalized.includes('.jpeg')) return 'jpg';
+  return 'png';
+}
+
+async function runPrompt(args) {
+  const context = await launchPersistentChrome({ ...args, preferFreshProfile: !args.headed });
+  await applyCookiesToContext(context, args);
+  const page = context.pages()[0] || await context.newPage();
+
+  try {
+    await page.addInitScript((promptTarget) => {
+      window.__codexPromptTarget = promptTarget;
+    }, normalizePromptText(args.prompt));
+
+    let result = null;
+    let attempt = 0;
+    while (attempt <= args.maxRateLimitRetries) {
+      await page.goto(GROK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await waitForEditorToHydrate(page, args.debug);
+      await dismissInterruptions(page, args.debug);
+      await assertLoggedIn(page);
+      await ensureImageMode(page, args.debug);
+
+      const promptInput = await findVisiblePromptLocator(page);
+      await fillPrompt(promptInput, args.prompt, args.debug);
+      await page.waitForFunction(() => {
+        const submit = document.querySelector('button[aria-label="Submit"]');
+        return !submit || !submit.disabled;
+      }, { timeout: 15000 }).catch(() => {});
+      const initialMetadata = await extractImageMetadata(page);
+      await submitPrompt(page, promptInput, args.debug);
+
+      try {
+        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata);
+        break;
+      } catch (error) {
+        const isRateLimit = /rate limit/i.test(error.message || '');
+        if (!isRateLimit || attempt >= args.maxRateLimitRetries) {
+          throw error;
+        }
+
+        const waitMs = args.rateLimitWaitMs * (attempt + 1);
+        console.warn(`Grok rate limited image generation. Waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${args.maxRateLimitRetries}...`);
+        await sleep(waitMs);
+        attempt += 1;
+      }
+    }
+
+    if (!result) {
+      throw new Error('Image generation did not produce a result');
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const outputPath = path.join(
+      args.outDir,
+      `${sanitizeFileName(args.prompt)}-${timestamp}.${inferImageExtension(result.directUrl)}`
+    );
+
+    const buttonResult = await downloadViaButton(page, outputPath, args.debug, {
+      prompt: args.prompt,
+      cardIndex: 0
+    });
+    if (buttonResult?.outputPath) {
+      console.log(`Downloaded image to ${buttonResult.outputPath}`);
+      return;
+    }
+
+    await downloadFromUrl(context, page, buttonResult?.directUrl || result.directUrl, outputPath, args.debug);
+    console.log(`Downloaded image to ${outputPath}`);
+  } finally {
+    await context.close();
+  }
+}
+
+async function main() {
+  try {
+    const args = parseArgs(process.argv.slice(2));
+
+    if (args.help || (!args.saveLogin && !args.prompt)) {
+      printUsage();
+      return;
+    }
+
+    if (args.saveLogin) {
+      await saveLoginState(args);
+      return;
+    }
+
+    await runPrompt(args);
+  } catch (error) {
+    console.error(`Error: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+main();

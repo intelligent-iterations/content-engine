@@ -1,0 +1,57 @@
+{
+  "name": "content-gen",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "AI-powered carousel and video content generation for TikTok, Instagram, and X",
+  "main": "code/cli/carousel.js",
+  "scripts": {
+    "start": "node code/cli/carousel.js",
+    "auth:setup": ".venv/bin/python setup.py",
+    "auth:posting": ".venv/bin/python setup.py",
+    "auth:posting:instagram": ".venv/bin/python setup.py --instagram",
+    "auth:posting:tiktok": ".venv/bin/python setup.py --tiktok",
+    "auth:posting:x": ".venv/bin/python setup.py --x",
+    "auth:grok": ".venv/bin/python code/cli/export-grok-cookies.py",
+    "auth:grok:image": "node code/image/grok-image-automation.js --save-login --headed",
+    "generate": "node code/cli/carousel.js",
+    "generate:v2": "node code/cli/carousel.js",
+    "test:grok:image": "node code/test-grok-image.js",
+    "test:overlay": "node code/test-overlay.js",
+    "video": "node code/cli/video-compilation.js",
+    "video:auto": "node code/cli/video.js",
+    "grok:export-session": ".venv/bin/python code/cli/export-grok-cookies.py",
+    "grok:login": "node code/cli/grok-video.js --save-login --headed",
+    "grok:image": "node code/image/grok-image-automation.js",
+    "grok:video": "node code/cli/grok-video.js",
+    "post:instagram": "node code/posting/post-to-instagram.js",
+    "autopost:instagram": "node code/posting/auto-post-instagram.js",
+    "autopost:instagram:video": "node code/posting/auto-post-instagram-ai-video.js",
+    "autopost:tiktok:video": "python3 code/posting/auto-post-tiktok-ai-video.py",
+    "post:x": "node code/posting/post-to-x.js",
+    "autopost:x": "node code/posting/auto-post-x.js",
+    "autopost:x:video": "node code/posting/auto-post-x-ai-video.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.4",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.58.0",
+    "sharp": "^0.33.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "content-gen",
+    "tiktok",
+    "instagram",
+    "x",
+    "automation",
+    "slideshow",
+    "video"
+  ],
+  "author": "Content Gen",
+  "license": "MIT"
+}
