@@ -578,6 +578,26 @@ async function detectErrorState(page) {
     return 'Grok reported a generation failure';
   }
 
+  const upsellPatterns = [
+    'upgrade to supergrok',
+    'upgrade to grok plus',
+    'subscribe to grok',
+    'supergrok plan',
+    'grok plus plan',
+    'unlock more',
+    'get more generations',
+    'generation limit reached',
+    'limit reached',
+    'you\'ve reached your limit',
+    'upgrade your plan',
+    'upgrade now',
+    'go premium',
+  ];
+
+  if (upsellPatterns.some((pattern) => lowered.includes(pattern))) {
+    return 'Grok free-tier limit reached (upgrade/subscription upsell detected). Use XAI_API_KEY or wait for the limit to reset.';
+  }
+
   return null;
 }
 

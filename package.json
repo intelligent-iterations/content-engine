@@ -26,7 +26,7 @@
     "post:instagram": "node code/posting/post-to-instagram.js",
     "autopost:instagram": "node code/posting/auto-post-instagram.js",
     "autopost:instagram:video": "node code/posting/auto-post-instagram-ai-video.js",
-    "autopost:tiktok:video": "python3 code/posting/auto-post-tiktok-ai-video.py",
+    "autopost:tiktok:video": "node code/posting/auto-post-tiktok-ai-video.js",
     "post:x": "node code/posting/post-to-x.js",
     "autopost:x": "node code/posting/auto-post-x.js",
     "autopost:x:video": "node code/posting/auto-post-x-ai-video.js"

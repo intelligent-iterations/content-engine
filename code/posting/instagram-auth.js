@@ -13,7 +13,7 @@ const COOKIE_FILE = path.join(REPO_ROOT, 'cookies', 'instagram_cookies.json');
 dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 
 function getInstagramUsername() {
-  return String(process.env.INSTAGRAM_USERNAME || 'contentgen').trim().replace(/^@/, '');
+  return (process.env.INSTAGRAM_USERNAME || '').trim().replace(/^@/, '');
 }
 
 function getInstagramPassword() {
@@ -65,7 +65,7 @@ export async function saveCookies(context) {
 }
 
 export async function dismissInstagramPrompts(page) {
-  const labels = ['Not now', 'Not Now', 'Cancel', 'Close', 'Skip'];
+  const labels = ['Not now', 'Not Now', 'Cancel', 'Close', 'Skip', 'OK', 'Ok'];
   for (const label of labels) {
     const locator = page.getByRole('button', { name: label }).first();
     try {
@@ -88,6 +88,15 @@ export async function ensureInstagramLoggedIn(page) {
   }
   if (href.includes('/accounts/login') || (haystack.includes('log in') && haystack.includes('sign up'))) {
     throw new Error('Instagram browser session is not logged in');
+  }
+  // Detect the "Continue as [user]" re-login screen (session expired but account remembered)
+  if (haystack.includes('use another profile') || haystack.includes('create new account')) {
+    throw new Error('Instagram session expired — Continue/re-login page detected');
+  }
+  // Detect redirect away from creation flow to homepage (not logged in)
+  // Only flag as not-logged-in if there are no signs of an active session
+  if (href === 'https://www.instagram.com/' && !haystack.includes('create') && !haystack.includes('switch') && !haystack.includes('suggested for you') && !haystack.includes('messages')) {
+    throw new Error('Instagram redirected to homepage — not logged in');
   }
 }
 

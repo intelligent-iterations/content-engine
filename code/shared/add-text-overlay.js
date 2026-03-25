@@ -137,8 +137,13 @@ export async function addTextOverlay(imageBuffer, text, position = 'top') {
   const textSvg = createTextSvg(text, position);
 
   // Process image with Sharp
+  // Use median filter to reduce JPEG block artifacts before upscaling,
+  // lanczos3 for high-quality resampling, and subtle sharpening to
+  // restore edge definition lost during resize.
   const result = await sharp(imageBuffer)
-    .resize(WIDTH, HEIGHT, { fit: 'cover', position: 'center' })
+    .median(3)
+    .resize(WIDTH, HEIGHT, { fit: 'cover', position: 'center', kernel: 'lanczos3' })
+    .sharpen({ sigma: 0.5 })
     .composite([
       {
         input: textSvg,
