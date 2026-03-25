@@ -1,4 +1,4 @@
-# Content Gen
+# Content Engine
 
 An agent-driven content tool for generating videos and carousels from plain English.
 
