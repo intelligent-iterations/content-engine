@@ -214,9 +214,9 @@ async function postToX(folderPath) {
     process.exit(1);
   }
 
-  // Generate tweet caption
+  // Generate tweet caption (use x_post_text from metadata when available)
   console.log('Generating tweet caption...');
-  let tweetText = await generateTweetCaption(metadata);
+  let tweetText = metadata.x_post_text || await generateTweetCaption(metadata);
   console.log(`  Caption: ${tweetText}`);
   console.log(`  Length: ${tweetText.length}/280`);
   console.log();

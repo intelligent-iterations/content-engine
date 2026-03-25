@@ -1,5 +1,6 @@
 /**
- * Post carousel or single media to Instagram using browser automation + cookies.
+ * Post carousel or single media to Instagram.
+ * Uses Playwright browser automation (same as reel posting).
  *
  * Usage:
  *   node code/posting/post-to-instagram.js <folder-path>
@@ -10,9 +11,9 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { postToInstagramViaBrowser } from './instagram-browser-post.js';
 import { SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
 import { resolveScheduledItem, updateScheduledPlatformPost } from '../shared/scheduled-queue.js';
+import { postToInstagramViaBrowser } from './instagram-browser-post.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, '..', '..');
@@ -54,6 +55,22 @@ function buildCaption(metadata) {
   return (captionText + hashtags).trim();
 }
 
+async function postViaBrowser({ caption, mediaPaths, mediaType }) {
+  const result = await postToInstagramViaBrowser({
+    caption,
+    mediaType,
+    mediaPaths,
+    headless: true,
+  });
+
+  const postId = (result.postUrl || '').split('/').filter(Boolean).pop() || `instagram-${Date.now()}`;
+  return {
+    postId,
+    postUrl: result.postUrl,
+    method: result.method || 'browser_cookies',
+  };
+}
+
 async function postToInstagram(folderPath) {
   const resolvedFolder = resolveFolderPath(folderPath);
   const scheduledItem = resolveScheduledItem('carousel', resolvedFolder);
@@ -85,28 +102,26 @@ async function postToInstagram(folderPath) {
   const caption = buildCaption(metadata);
 
   console.log('='.repeat(50));
-  console.log('  Instagram Browser Poster');
+  console.log('  Instagram Poster');
   console.log('='.repeat(50));
   console.log(`Topic: ${metadata.topic}`);
   console.log(`Folder: ${folderName}`);
   console.log(`Slides: ${mediaPaths.length}`);
   console.log();
 
-  const result = await postToInstagramViaBrowser({
-    caption,
-    mediaType: mediaPaths.length > 1 ? 'carousel' : 'image',
-    mediaPaths,
-    headless: true,
-  });
+  let result;
+  const isCarousel = mediaPaths.length > 1;
 
-  const postId = result.postUrl.split('/').filter(Boolean).pop() || `instagram-${Date.now()}`;
+  console.log(`Using Playwright browser automation for ${isCarousel ? 'carousel' : 'single image'}...\n`);
+  result = await postViaBrowser({ caption, mediaPaths, mediaType: isCarousel ? 'carousel' : 'image' });
+
   updateScheduledPlatformPost('carousel', resolvedFolder, 'instagram', {
-    post_id: postId,
+    post_id: result.postId,
     permalink: result.postUrl,
     source_file: path.relative(REPO_ROOT, resolvedFolder),
   });
 
-  return { postId, postUrl: result.postUrl, method: result.method };
+  return result;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

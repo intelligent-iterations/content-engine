@@ -11,6 +11,10 @@ Keep separate:
 
 Anything that goes into an AI prompt should come from saved repo state, not one-off inline prompt logic.
 
+## Research
+
+All research artifacts go under `research/`. This directory is gitignored — research is local working state, not committed to the repo. Use it for format research, prompt strategy notes, practitioner findings, and any intermediate research files. Reference research from templates and run artifacts, but keep the raw research in `research/`.
+
 ## Output Rules
 
 - Video outputs go under `output/videos/<concept-slug>/`
@@ -109,6 +113,16 @@ The user may use different Chrome profiles for different platforms (e.g. one acc
 Cookie files are a JSON array of objects with fields: `name`, `value`, `domain`, `path`, `expires`, `httpOnly`, `secure`, `sameSite`.
 
 All cookie files are gitignored. No secrets are committed.
+
+The posting scripts detect usernames at runtime by logging in with cookies and reading the username from the platform page (e.g. TikTok Studio HTML, Instagram nav, X profile). No username env vars are required. The following env vars are optional hints — if set, they're used as a starting point, but the scripts always verify from the platform:
+
+- `INSTAGRAM_USERNAME` — optional, detected from logged-in page
+- `TIKTOK_ACCOUNT_NAME` — optional, detected from TikTok Studio
+- `X_USERNAME` — optional, detected from X profile
+
+## Social Media Accounts — Source of Truth
+
+Never hardcode, guess, or assume usernames. The posting scripts derive them at runtime by logging in with stored cookies and reading the username from the platform's own page or API data. If a username is needed to construct a permalink or URL, fetch it from the platform first.
 
 ## Standard
 

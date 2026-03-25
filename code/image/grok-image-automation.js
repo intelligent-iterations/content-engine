@@ -20,6 +20,7 @@ const DEFAULT_STATE_PATH = path.join(PROJECT_ROOT, 'auth', 'grok-storage-state.j
 const DEFAULT_DOWNLOAD_DIR = path.join(TEMP_DIR, 'grok-images');
 const DEFAULT_USER_DATA_DIR = path.join(PROJECT_ROOT, 'auth', 'grok-chrome-profile');
 const DEFAULT_TIMEOUT_MS = 8 * 60 * 1000;
+const MIN_IMAGE_DIMENSION = 768;
 const DEFAULT_RATE_LIMIT_WAIT_MS = 60000;
 const DEFAULT_MAX_RATE_LIMIT_RETRIES = 3;
 const GROK_URL = 'https://grok.com/imagine';
@@ -484,6 +485,26 @@ async function detectErrorState(page) {
     return 'Grok reported a generation failure';
   }
 
+  const upsellPatterns = [
+    'upgrade to supergrok',
+    'upgrade to grok plus',
+    'subscribe to grok',
+    'supergrok plan',
+    'grok plus plan',
+    'unlock more',
+    'get more generations',
+    'generation limit reached',
+    'limit reached',
+    'you\'ve reached your limit',
+    'upgrade your plan',
+    'upgrade now',
+    'go premium',
+  ];
+
+  if (upsellPatterns.some((pattern) => lowered.includes(pattern))) {
+    return 'Grok free-tier limit reached (upgrade/subscription upsell detected). Use XAI_API_KEY or wait for the limit to reset.';
+  }
+
   return null;
 }
 
@@ -607,12 +628,24 @@ async function resolvePromptSection(page, prompt, debug) {
   return locator.first();
 }
 
-async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
+
+async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interceptedJobIds = []) {
   const deadline = Date.now() + timeoutMs;
   let sawProgress = false;
   const knownUrls = collectKnownMediaUrls(initialMetadata);
   const knownPublicAssetUrls = new Set(await collectKnownPublicAssetUrls(page).catch(() => []));
-  const dataUrlFallbackAt = Date.now() + Math.min(45000, Math.max(12000, Math.floor(timeoutMs / 3)));
+
+  // Grok shows a compressed data URL preview (~31KB) on the main page.
+  // The full-quality image is only on the /imagine/post/{jobId} page,
+  // where it loads as an HTTP CDN URL (share-images).
+  //
+  // Strategy:
+  //   1. Wait for any generated image to appear (even as preview)
+  //   2. Once preview + job ID available, navigate directly to /imagine/post/{jobId}
+  //   3. Wait for the full-res CDN image on the post page
+  //   4. Fall back to best data URL if no CDN image appears
+
+  let previewDetected = false;
 
   while (Date.now() < deadline) {
     await dismissInterruptions(page, debug);
@@ -622,16 +655,18 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
       throw new Error(error);
     }
 
+    // PATH 1: Check for CDN public asset URLs (best quality)
     const publicAssetUrls = await collectKnownPublicAssetUrls(page).catch(() => []);
     const newPublicAssetUrl = publicAssetUrls.find((url) => !knownPublicAssetUrls.has(url)) || null;
     if (newPublicAssetUrl) {
-      logDebug(debug, `Public asset URL detected: ${newPublicAssetUrl}`);
+      logDebug(debug, `Public asset CDN URL detected: ${newPublicAssetUrl}`);
       return {
         directUrl: newPublicAssetUrl,
         metadata: await extractImageMetadata(page).catch(() => initialMetadata)
       };
     }
 
+    // PATH 2: Check for new direct image URLs
     const metadata = await extractImageMetadata(page);
     const directUrl = chooseDirectImageUrl({
       ...metadata,
@@ -640,20 +675,42 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
       downloadLinks: metadata.downloadLinks.filter((link) => !knownUrls.has(link.href))
     });
 
-    if (directUrl && (!/^data:image\//i.test(directUrl) || Date.now() >= dataUrlFallbackAt)) {
-      logDebug(debug, `Direct image URL detected: ${directUrl}`);
-      return { directUrl, metadata };
+    if (directUrl) {
+      if (/^data:image\//i.test(directUrl)) {
+        const matchingImg = metadata.imageUrls.find((img) => img.src === directUrl);
+        const imgMaxDim = matchingImg ? Math.max(matchingImg.width, matchingImg.height) : 0;
+
+        if (imgMaxDim >= MIN_IMAGE_DIMENSION && !previewDetected) {
+          previewDetected = true;
+          logDebug(debug, `Preview detected (${matchingImg?.width}x${matchingImg?.height}, ${Math.round(directUrl.length / 1024)}KB)`);
+
+          // Once we have a preview and a job ID, navigate directly to the
+          // post page to get the full-res CDN image (clicking doesn't work
+          // in headless mode).
+          if (interceptedJobIds.length > 0) {
+            logDebug(debug, `Have ${interceptedJobIds.length} job IDs — navigating to post page for full-res image`);
+            return { directUrl, metadata };
+          }
+        }
+      } else {
+        logDebug(debug, `Direct HTTP image URL detected: ${directUrl}`);
+        return { directUrl, metadata };
+      }
     }
 
+    // PATH 3: Check image selector candidates for HTTP URLs
     for (const selector of IMAGE_SELECTOR_CANDIDATES) {
       const image = page.locator(selector).filter({ visible: true }).first();
       try {
         if (await image.isVisible({ timeout: 500 })) {
-          const src = await image.evaluate((node) => node.currentSrc || node.src || '');
-          const canUseDataUrl = /^data:image\//i.test(src) && Date.now() >= dataUrlFallbackAt;
-          if (src && !knownUrls.has(src) && (/^https?:/i.test(src) || canUseDataUrl)) {
-            logDebug(debug, `Image element source detected: ${src}`);
-            return { directUrl: src, metadata };
+          const imgData = await image.evaluate((node) => ({
+            src: node.currentSrc || node.src || '',
+            width: node.naturalWidth || 0,
+            height: node.naturalHeight || 0
+          }));
+          if (imgData.src && !knownUrls.has(imgData.src) && /^https?:/i.test(imgData.src)) {
+            logDebug(debug, `Image element HTTP source detected: ${imgData.src} (${imgData.width}x${imgData.height})`);
+            return { directUrl: imgData.src, metadata };
           }
         }
       } catch {
@@ -661,22 +718,26 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
       }
     }
 
+    // If preview detected but no job IDs yet, wait for WS to deliver them
+    if (previewDetected && interceptedJobIds.length > 0) {
+      logDebug(debug, 'Preview + job IDs ready — returning for post-page navigation');
+      const lastMetadata = await extractImageMetadata(page).catch(() => initialMetadata);
+      const lastDirectUrl = chooseDirectImageUrl(lastMetadata);
+      if (lastDirectUrl) {
+        return { directUrl: lastDirectUrl, metadata: lastMetadata };
+      }
+    }
+
     const progressButton = page.locator('button[aria-label*="Options"]').first();
     try {
       if (await progressButton.isVisible({ timeout: 300 })) {
         sawProgress = true;
-        const progressText = await progressButton.innerText().catch(() => '');
-        logDebug(debug, `Generation progress visible: ${progressText || 'Options'}`);
       }
     } catch {
       // Ignore missing progress button.
     }
 
-    if (metadata.currentUrl.includes('/imagine/post/')) {
-      logDebug(debug, `On imagine post route: ${metadata.currentUrl}`);
-    }
-
-    await page.waitForTimeout(sawProgress ? 2500 : 1500);
+    await page.waitForTimeout(previewDetected ? 2000 : (sawProgress ? 2500 : 1500));
   }
 
   throw new Error(`Timed out waiting for image generation after ${Math.round(timeoutMs / 1000)}s`);
@@ -875,10 +936,164 @@ async function runPrompt(args) {
         return !submit || !submit.disabled;
       }, { timeout: 15000 }).catch(() => {});
       const initialMetadata = await extractImageMetadata(page);
+
+      // Intercept WebSocket frames to capture full-resolution CDN URLs.
+      // Grok Imagine uses WebSocket (wss://grok.com/ws/imagine/listen) for
+      // generation. Completion frames contain CDN image URLs.
+      const baselinePublicUrls = new Set(await collectKnownPublicAssetUrls(page).catch(() => []));
+      const interceptedCdnUrls = [];
+      const interceptedJobIds = [];
+
+      const cdpSession = await page.context().newCDPSession(page);
+      await cdpSession.send('Network.enable');
+
+      const wsFrameHandler = (params) => {
+        try {
+          const data = params.response?.payloadData || '';
+          if (!data || data.length < 10) return;
+
+          // Parse JSON frames
+          let frame;
+          try { frame = JSON.parse(data); } catch { return; }
+
+          // Track job IDs
+          if (frame.job_id && !interceptedJobIds.includes(frame.job_id)) {
+            interceptedJobIds.push(frame.job_id);
+            logDebug(args.debug, `WS job: ${frame.job_id} status=${frame.current_status}`);
+          }
+
+          // Look for CDN URLs in any field
+          const frameStr = data;
+          const cdnMatches = frameStr.match(/https?:\/\/imagine-public\.x\.ai[^\s"')\]}>]+\.(png|jpe?g|webp)(\?[^\s"')\]}>]*)?/gi);
+          if (cdnMatches) {
+            for (const match of cdnMatches) {
+              if (!baselinePublicUrls.has(match) && !interceptedCdnUrls.includes(match)) {
+                interceptedCdnUrls.push(match);
+                logDebug(args.debug, `WS CDN URL: ${match}`);
+              }
+            }
+          }
+
+          // Check for image_url, url, or similar fields
+          if (frame.image_url || frame.url || frame.imageUrl) {
+            const url = frame.image_url || frame.url || frame.imageUrl;
+            if (/^https?:/.test(url) && !interceptedCdnUrls.includes(url)) {
+              interceptedCdnUrls.push(url);
+              logDebug(args.debug, `WS image URL field: ${url}`);
+            }
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+      cdpSession.on('Network.webSocketFrameReceived', wsFrameHandler);
+
+      // Also watch HTTP responses for CDN URLs
+      const cdnResponseHandler = async (response) => {
+        try {
+          const url = response.url();
+          if (
+            response.status() === 200
+            && /imagine-public\.x\.ai\/imagine-public\/(images|share-images)\/.+\.(png|jpe?g|webp)(\?|$)/i.test(url)
+            && !baselinePublicUrls.has(url)
+          ) {
+            interceptedCdnUrls.push(url);
+            logDebug(args.debug, `HTTP CDN response: ${url}`);
+          }
+        } catch {}
+      };
+      page.on('response', cdnResponseHandler);
+
       await submitPrompt(page, promptInput, args.debug);
 
       try {
-        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata);
+        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata, interceptedJobIds);
+
+        // Try to upgrade from data URL preview to full-res CDN image.
+        // The WS-intercepted /images/{jobId} CDN URLs are the exact generated
+        // images. In-page fetch fails (CORS), but context.request bypasses CORS.
+        if (/^data:/.test(result.directUrl || '') && interceptedJobIds.length > 0) {
+          // Wait a moment for remaining WS CDN URLs to arrive
+          await page.waitForTimeout(5000);
+
+          // Strategy 1: Download /images/{jobId} URLs via context.request (bypasses CORS)
+          const wsImageUrls = interceptedCdnUrls.filter((u) => /\/images\//.test(u));
+          logDebug(args.debug, `Trying ${wsImageUrls.length} WS /images/ URLs via context.request`);
+          for (const wsUrl of wsImageUrls) {
+            try {
+              const resp = await context.request.get(wsUrl, {
+                timeout: 10000,
+                headers: { referer: 'https://grok.com/', origin: 'https://grok.com' }
+              });
+              if (resp.ok()) {
+                const body = await resp.body();
+                if (body.length > 50000) {
+                  logDebug(args.debug, `Full-res image downloaded: ${wsUrl} (${body.length} bytes)`);
+                  result.directUrl = wsUrl;
+                  break;
+                }
+                logDebug(args.debug, `${wsUrl} returned ${body.length} bytes (too small)`);
+              } else {
+                logDebug(args.debug, `${wsUrl} returned status ${resp.status()}`);
+              }
+            } catch (e) {
+              logDebug(args.debug, `${wsUrl} context.request failed: ${e.message}`);
+            }
+          }
+
+          // Strategy 2: Navigate to post page, wait for the generated image to load
+          if (/^data:/.test(result.directUrl || '')) {
+            for (const jobId of interceptedJobIds.slice(0, 2)) {
+              const postUrl = `https://grok.com/imagine/post/${jobId}`;
+              logDebug(args.debug, `Navigating to post page: ${postUrl}`);
+              await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 20000 }).catch(() => {});
+              await page.waitForTimeout(5000);
+
+              // Look for CDN images on the post page — only match actual CDN paths
+              const mainImage = await page.evaluate(() => {
+                const imgs = Array.from(document.querySelectorAll('img'));
+                const cdnImgs = imgs
+                  .map((img) => ({
+                    src: img.currentSrc || img.src || '',
+                    w: img.naturalWidth || img.width || 0,
+                    h: img.naturalHeight || img.height || 0
+                  }))
+                  .filter((img) =>
+                    /^https:\/\/imagine-public\.x\.ai\/imagine-public\/(images|share-images)\//.test(img.src)
+                    && Math.max(img.w, img.h) >= 800
+                  )
+                  .sort((a, b) => (b.w * b.h) - (a.w * a.h));
+                return cdnImgs[0] || null;
+              }).catch(() => null);
+
+              if (mainImage) {
+                logDebug(args.debug, `Post page image: ${mainImage.src} (${mainImage.w}x${mainImage.h})`);
+                result.directUrl = mainImage.src;
+                break;
+              }
+
+              // Strategy 3: Try context.request on /images/{jobId} URLs
+              for (const ext of ['png', 'jpg']) {
+                const cdnUrl = `https://imagine-public.x.ai/imagine-public/images/${jobId}.${ext}`;
+                try {
+                  const resp = await context.request.get(cdnUrl, {
+                    timeout: 8000,
+                    headers: { referer: 'https://grok.com/', origin: 'https://grok.com' }
+                  });
+                  if (resp.ok()) {
+                    const body = await resp.body();
+                    if (body.length > 50000) {
+                      logDebug(args.debug, `CDN /images/ accessible: ${cdnUrl} (${body.length} bytes)`);
+                      result.directUrl = cdnUrl;
+                      break;
+                    }
+                  }
+                } catch {}
+              }
+              if (!/^data:/.test(result.directUrl || '')) break;
+            }
+          }
+        }
         break;
       } catch (error) {
         const isRateLimit = /rate limit/i.test(error.message || '');
@@ -890,6 +1105,10 @@ async function runPrompt(args) {
         console.warn(`Grok rate limited image generation. Waiting ${Math.round(waitMs / 1000)}s before retry ${attempt + 1}/${args.maxRateLimitRetries}...`);
         await sleep(waitMs);
         attempt += 1;
+      } finally {
+        page.off('response', cdnResponseHandler);
+        cdpSession.off('Network.webSocketFrameReceived', wsFrameHandler);
+        await cdpSession.detach().catch(() => {});
       }
     }
 

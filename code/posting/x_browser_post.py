@@ -26,7 +26,7 @@ import zendriver as zd
 from zendriver.core.config import Config as ZDConfig
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 COOKIE_FILE = REPO_ROOT / "cookies" / "x_cookies.json"
 CHROME_PATH_MACOS = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CHROMIUM_PATH_LINUX = "/usr/bin/chromium"
@@ -68,6 +68,21 @@ async def sleep_brief(seconds=1.5):
     await asyncio.sleep(seconds)
 
 
+async def save_debug_screenshot(page, label):
+    try:
+        debug_dir = REPO_ROOT / "output" / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        import time
+        filename = f"x-{label}-{int(time.time())}.png"
+        filepath = debug_dir / filename
+        await page.save_screenshot(filepath, format="png")
+        print(f"  [debug] Screenshot saved: output/debug/{filename}", file=sys.stderr)
+        return str(filepath)
+    except Exception as e:
+        print(f"  [debug] Screenshot failed: {e}", file=sys.stderr)
+        return None
+
+
 async def start_x_browser(headless=True):
     kwargs = {
         "headless": headless,
@@ -98,14 +113,42 @@ async def ensure_x_logged_in(page):
     title = await page.evaluate("() => document.title || ''")
     page_text = await page.evaluate("() => (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 1200)")
     haystack = " ".join([href or "", title or "", page_text or ""]).lower()
-    if "/i/flow/login" in (href or "") or ("sign in" in haystack and "create account" in haystack):
-        raise RuntimeError("X browser session is not logged in")
+    # Check for login page, landing/signup page, or compose redirect to non-logged-in state
+    if "/i/flow/login" in (href or ""):
+        raise RuntimeError("X browser session is not logged in — redirected to login flow")
+    if "sign in" in haystack and "create account" in haystack:
+        raise RuntimeError("X browser session is not logged in — sign in page detected")
+    if "join today" in haystack and "sign up" in haystack:
+        raise RuntimeError("X browser session is not logged in — landing page detected (cookies expired)")
+    if "happening now" in haystack:
+        raise RuntimeError("X browser session is not logged in — landing page detected (cookies expired)")
+    # Check we're not stuck on x.com root without being logged in
+    if (href or "").rstrip("/") in ("https://x.com", "http://x.com"):
+        # If on root, check for home timeline indicators
+        has_timeline = "home" in haystack or "for you" in haystack or "following" in haystack
+        if not has_timeline:
+            raise RuntimeError("X browser session is not logged in — no timeline detected on root page")
 
 
 async def open_x_session(browser, url="https://x.com/home"):
-    await browser.get("https://x.com/")
+    page = await browser.get("https://x.com/")
     await sleep_brief(2)
-    await browser.cookies.set_all(load_x_cookies())
+    cookies = load_x_cookies()
+
+    # Build proper CookieParam objects for CDP
+    cdp_cookies = []
+    for cookie in cookies:
+        cdp_cookies.append(zd.cdp.network.CookieParam(
+            name=cookie["name"],
+            value=cookie["value"],
+            domain=cookie.get("domain", ".x.com"),
+            path=cookie.get("path", "/"),
+            secure=cookie.get("secure", False),
+            http_only=cookie.get("httpOnly", False),
+        ))
+
+    await page.send(zd.cdp.network.set_cookies(cdp_cookies))
+
     page = await browser.get(url)
     await sleep_brief(5)
     await ensure_x_logged_in(page)
@@ -222,6 +265,15 @@ async def actor_username(page):
         match = re.search(r"/([A-Za-z0-9_]+)$", href)
         if match:
             return match.group(1)
+    # Fallback: extract screen_name from page source
+    try:
+        source = await page.get_content()
+        if isinstance(source, str):
+            sn_match = re.search(r'screen_name["\s:]+([A-Za-z0-9_]+)', source)
+            if sn_match:
+                return sn_match.group(1)
+    except Exception:
+        pass
     env_username = os.environ.get("X_USERNAME", "").strip().lstrip("@")
     return env_username or "user"
 
@@ -265,6 +317,22 @@ async def status_urls_on_page(page, username=""):
                     urls.append(normalized)
             else:
                 urls.append(normalized)
+    # Fallback: parse status URLs from page source when evaluate returns empty
+    if not urls:
+        try:
+            source = await page.get_content()
+            if isinstance(source, str):
+                pattern = r'href="(/[A-Za-z0-9_]+/status/\d+)"'
+                for match in re.finditer(pattern, source):
+                    normalized = normalize_x_url(match.group(1))
+                    if username:
+                        prefix = f"https://x.com/{username.lower()}/status/"
+                        if normalized.lower().startswith(prefix):
+                            urls.append(normalized)
+                    else:
+                        urls.append(normalized)
+        except Exception:
+            pass
     deduped = []
     seen = set()
     for url in urls:
@@ -287,6 +355,13 @@ async def latest_profile_status_url(browser, username, expected_text=""):
             continue
         if not expected:
             return candidates[0]
+        # When expected text is provided, try to match it against page source
+        try:
+            source = await page.get_content()
+            if isinstance(source, str) and expected[:40] in source.lower():
+                return candidates[0]
+        except Exception:
+            pass
         for candidate in candidates:
             status_id = status_id_from_url(candidate)
             if not status_id:
@@ -349,6 +424,30 @@ async def latest_search_status_url(browser, username, expected_text=""):
     return ""
 
 
+async def wait_for_post_button_enabled(page, timeout=120):
+    """Wait until the Post button is no longer disabled (video finished processing)."""
+    for _ in range(timeout // 2):
+        result = await page.evaluate(
+            """
+            () => {
+                const buttons = Array.from(document.querySelectorAll('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]'));
+                for (const btn of buttons) {
+                    const rect = btn.getBoundingClientRect();
+                    const style = window.getComputedStyle(btn);
+                    const disabled = btn.disabled || btn.getAttribute('aria-disabled') === 'true';
+                    const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                    if (visible) return { found: true, disabled };
+                }
+                return { found: false, disabled: true };
+            }
+            """
+        )
+        if isinstance(result, dict) and result.get("found") and not result.get("disabled"):
+            return True
+        await sleep_brief(2)
+    return False
+
+
 async def upload_media(page, media_paths):
     if not media_paths:
         return
@@ -356,8 +455,16 @@ async def upload_media(page, media_paths):
     if not file_input:
         raise RuntimeError("Could not locate X media upload input")
     await file_input.send_file(*media_paths)
-    wait_seconds = 12 if len(media_paths) == 1 and str(media_paths[0]).lower().endswith(".mp4") else 6
+    is_video = len(media_paths) == 1 and str(media_paths[0]).lower().endswith(".mp4")
+    wait_seconds = 15 if is_video else 6
     await sleep_brief(wait_seconds)
+    if is_video:
+        print("  [debug] Waiting for video processing to complete...", file=sys.stderr)
+        ready = await wait_for_post_button_enabled(page, timeout=120)
+        if ready:
+            print("  [debug] Video processing complete, Post button enabled", file=sys.stderr)
+        else:
+            print("  [debug] Warning: Post button still disabled after 120s, attempting submit anyway", file=sys.stderr)
 
 
 async def run():
@@ -377,9 +484,12 @@ async def run():
         browser = await start_x_browser(headless=headless)
         page = await open_x_session(browser, "https://x.com/compose/post")
 
+        await save_debug_screenshot(page, "01-compose-page")
+
         try:
             await type_text(page, text)
         except Exception:
+            await save_debug_screenshot(page, "01b-type-failed")
             await click_first(
                 page,
                 selectors=('[data-testid="SideNav_NewTweet_Button"]', '[data-testid="tweetButtonInline"]'),
@@ -388,7 +498,11 @@ async def run():
             )
             await type_text(page, text)
 
+        await save_debug_screenshot(page, "02-after-text")
+
         await upload_media(page, media_paths)
+
+        await save_debug_screenshot(page, "03-after-media")
 
         clicked = await click_visible_x_submit(page)
         if not clicked:
@@ -399,11 +513,18 @@ async def run():
                 timeout=5,
             )
         if not clicked:
+            await save_debug_screenshot(page, "04-submit-not-found")
             raise RuntimeError("Could not locate X post submit button")
 
-        await sleep_brief(5)
+        print("  [debug] Submit button clicked, waiting for post...", file=sys.stderr)
+        await sleep_brief(10)  # Increased from 5 to 10 seconds
+
+        await save_debug_screenshot(page, "05-after-submit")
+
         username = await actor_username(page)
         current_url = await page.evaluate("() => window.location.href || ''")
+        print(f"  [debug] URL after submit: {current_url}", file=sys.stderr)
+
         permalink = ""
         if isinstance(current_url, str) and "/status/" in current_url:
             permalink = normalize_x_url(current_url)
@@ -416,7 +537,15 @@ async def run():
 
         tweet_id = status_id_from_url(permalink)
         if not permalink or not tweet_id:
-            raise RuntimeError("X post may have submitted, but permalink could not be resolved")
+            await save_debug_screenshot(page, "06-verification-failed")
+            print(json.dumps({
+                "ok": False,
+                "error": f"Post submit button was clicked but tweet could not be verified. Check https://x.com/{username} manually. Debug screenshots saved to output/debug/",
+                "username": username,
+                "platform": "x",
+                "method": "browser_cookies",
+            }))
+            return
 
         print(json.dumps({
             "ok": True,
@@ -425,6 +554,7 @@ async def run():
             "username": username,
             "platform": "x",
             "method": "browser_cookies",
+            "verified": True,
         }))
     finally:
         if browser:
