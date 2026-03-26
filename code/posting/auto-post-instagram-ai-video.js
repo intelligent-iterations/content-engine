@@ -22,11 +22,6 @@ const REPO_ROOT = path.join(__dirname, '..', '..');
 // Load environment variables from repo root
 dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 
-if (!process.env.INSTAGRAM_USERNAME || !process.env.INSTAGRAM_PASSWORD) {
-  console.error('ERROR: INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD must be set in content-gen/.env');
-  process.exit(1);
-}
-
 const POSTS_PER_RUN = 1;
 
 /**
