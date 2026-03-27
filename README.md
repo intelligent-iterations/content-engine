@@ -19,7 +19,7 @@
 
 ---
 
-Content Engine turns plain-English prompts into publish-ready videos and carousels for TikTok, Instagram, and X. Open the repo in [Claude Code](https://claude.ai) or [Codex](https://openai.com/codex), describe what you want, and the agent handles research, template selection, asset generation, captioning, and scheduled posting.
+II Content Engine turns plain-English prompts into publish-ready videos and carousels for TikTok, Instagram, and X. Open the repo in [Claude Code](https://claude.ai) or [Codex](https://openai.com/codex), describe what you want, and the agent handles research, template selection, asset generation, captioning, and scheduled posting.
 
 Everything is **template-first** — your ideas become reusable formats, not throwaway prompts. Generation is powered by **Grok** (API key or browser session), so you can produce content with or without an xAI API key. Approved assets flow into a scheduling queue that posts on your behalf.
 
