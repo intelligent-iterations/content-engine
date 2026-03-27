@@ -2,7 +2,7 @@
   <img src="assets/logo.png" width="280" alt="Content Engine logo" />
 </p>
 
-<h1 align="center">Content Engine</h1>
+<h1 align="center">II Content Engine</h1>
 
 <p align="center">
   AI-powered content engine for videos and carousels.<br/>
