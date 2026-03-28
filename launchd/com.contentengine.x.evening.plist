@@ -8,8 +8,9 @@
   <string>/Users/admin/content-engine</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/homebrew/bin/node</string>
-    <string>/Users/admin/content-engine/code/posting/run-x-slot.js</string>
+    <string>/bin/sh</string>
+    <string>/Users/admin/content-engine/scripts/docker-slot.sh</string>
+    <string>x</string>
     <string>evening</string>
   </array>
   <key>StartCalendarInterval</key>

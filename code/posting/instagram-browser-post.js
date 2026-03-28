@@ -17,6 +17,16 @@ const COOKIE_FILE = path.join(REPO_ROOT, 'cookies', 'instagram_cookies.json');
 
 dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 
+function chromiumLaunchOptions(headless) {
+  const executablePath = fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined;
+  return {
+    headless,
+    slowMo: headless ? 0 : 40,
+    executablePath,
+    args: executablePath ? ['--no-sandbox'] : undefined,
+  };
+}
+
 async function loadCookies(context) {
   if (!fs.existsSync(COOKIE_FILE)) return false;
   const raw = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
@@ -123,16 +133,37 @@ async function saveDebugScreenshot(page, label) {
   }
 }
 
+async function waitForInstagramEditorScreen(page, timeoutMs = 20000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const state = await page.evaluate(() => {
+      const body = document.body?.innerText || '';
+      const hasCaptionBox = !!document.querySelector(
+        'textarea[aria-label*="caption" i], textarea[placeholder*="caption" i], div[aria-label*="Write a caption" i][contenteditable="true"], div[contenteditable="true"][role="textbox"]'
+      );
+      const hasUploadPrompt = body.includes('Drag photos and videos here') || body.includes('Select from computer');
+      const hasNext = /(^|\s)Next(\s|$)/i.test(body);
+      return { hasCaptionBox, hasUploadPrompt, hasNext };
+    }).catch(() => ({ hasCaptionBox: false, hasUploadPrompt: false, hasNext: false }));
+
+    if (state.hasCaptionBox || state.hasNext || !state.hasUploadPrompt) {
+      return state;
+    }
+
+    await page.waitForTimeout(1000);
+  }
+
+  return { hasCaptionBox: false, hasUploadPrompt: true, hasNext: false };
+}
+
 export async function postToInstagramViaBrowser({ caption = '', mediaType = 'image', mediaPaths = [], headless = true }) {
   let username = String(process.env.INSTAGRAM_USERNAME || '').replace(/^@/, '');
   let browser;
   let context;
   let page;
   try {
-    browser = await chromium.launch({
-      headless,
-      slowMo: headless ? 0 : 40,
-    });
+    browser = await chromium.launch(chromiumLaunchOptions(headless));
     context = await browser.newContext();
     const hadCookies = await loadCookies(context);
     page = await context.newPage();
@@ -191,7 +222,7 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
       await saveDebugScreenshot(page, '01b-not-logged-in');
       await browser.close();
       const auth = await authenticateInstagram({ headless: false, manualFallback: true });
-      browser = await chromium.launch({ headless, slowMo: headless ? 0 : 40 });
+      browser = await chromium.launch(chromiumLaunchOptions(headless));
       context = await browser.newContext();
       await loadCookies(context);
       page = await context.newPage();
@@ -374,17 +405,14 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
         console.log('  [debug] No dialog detected, proceeding to look for file input anyway');
       });
 
-      // Try direct file input first, fall back to filechooser event
-      const input = page.locator('input[type="file"]').first();
-      const inputAttached = await input.waitFor({ state: 'attached', timeout: 8000 }).then(() => true).catch(() => false);
-      if (inputAttached) {
-        await input.setInputFiles(mediaPaths);
-      } else {
-        console.log('  [debug] No file input found, trying filechooser event with Select button...');
+      let uploaded = false;
+
+      // Prefer the filechooser route because the hidden input can exist without
+      // actually being wired to the visible modal in Instagram's current UI.
+      try {
         const [fileChooser] = await Promise.all([
-          page.waitForEvent('filechooser', { timeout: 15000 }),
+          page.waitForEvent('filechooser', { timeout: 12000 }),
           (async () => {
-            // Click any visible "Select from computer" / "Select" button in the dialog
             for (const sel of [
               'button:has-text("Select from computer")',
               'button:has-text("Select from your computer")',
@@ -398,7 +426,7 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
                 return;
               }
             }
-            // Last resort: click any blue/primary button in the dialog
+
             const primaryBtn = page.locator('[role="dialog"] button, [role="presentation"] button').first();
             if (await primaryBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
               await primaryBtn.click();
@@ -406,8 +434,41 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
           })(),
         ]);
         await fileChooser.setFiles(mediaPaths);
+        uploaded = true;
+        console.log('  [debug] Uploaded via filechooser');
+      } catch {
+        console.log('  [debug] Filechooser path unavailable, trying direct input...');
       }
+
+      if (!uploaded) {
+        const input = page.locator('input[type="file"]').first();
+        const inputAttached = await input.waitFor({ state: 'attached', timeout: 8000 }).then(() => true).catch(() => false);
+        if (!inputAttached) {
+          throw new Error('Instagram upload failed: no usable file chooser or file input found');
+        }
+        await input.setInputFiles(mediaPaths);
+        console.log('  [debug] Uploaded via file input');
+      }
+
       await page.waitForTimeout(mediaType === 'reel' || mediaType === 'video' ? 10000 : 6000);
+
+      const editorState = await waitForInstagramEditorScreen(page, 12000);
+      if (editorState.hasUploadPrompt && !editorState.hasNext && !editorState.hasCaptionBox) {
+        const uploadDiagnostics = await page.evaluate(() => {
+          const fileInput = document.querySelector('input[type="file"]');
+          return {
+            hasSelectedFile: Boolean(fileInput?.files?.length),
+            selectedFileName: fileInput?.files?.[0]?.name || null,
+            loading: !!document.querySelector('[data-visualcompletion="loading-state"]'),
+          };
+        }).catch(() => ({ hasSelectedFile: false, selectedFileName: null, loading: false }));
+
+        if (uploadDiagnostics.hasSelectedFile && uploadDiagnostics.loading) {
+          throw new Error(`Instagram upload stalled after file selection: ${uploadDiagnostics.selectedFileName || 'attached video'} never progressed past the initial modal`);
+        }
+
+        throw new Error('Instagram upload failed: modal stayed on the initial "Select from computer" screen');
+      }
     }
 
     await saveDebugScreenshot(page, '02-after-upload');
@@ -468,10 +529,39 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
 
     await saveDebugScreenshot(page, '03-after-next');
 
-    const captionBox = page.locator('textarea[aria-label*="caption"], textarea[placeholder*="caption"], div[aria-label*="Write a caption"][contenteditable="true"], div[contenteditable="true"]').first();
-    await captionBox.waitFor({ state: 'visible', timeout: 15000 });
-    await captionBox.click();
-    await captionBox.fill(String(caption || '').slice(0, 2200));
+    const captionSelectors = [
+      'textarea[aria-label*="caption" i]',
+      'textarea[placeholder*="caption" i]',
+      'div[aria-label*="Write a caption" i][contenteditable="true"]',
+      'div[contenteditable="true"][role="textbox"]',
+      '[role="textbox"][contenteditable="true"]',
+      'div[contenteditable="true"]',
+    ];
+
+    let captionFilled = false;
+    for (const selector of captionSelectors) {
+      const captionBox = page.locator(selector).first();
+      if (!(await captionBox.isVisible({ timeout: 2500 }).catch(() => false))) {
+        continue;
+      }
+
+      await captionBox.click().catch(() => {});
+      await page.waitForTimeout(300);
+
+      // contenteditable surfaces do not support fill reliably
+      const isMac = process.platform === 'darwin';
+      await page.keyboard.press(isMac ? 'Meta+a' : 'Control+a').catch(() => {});
+      await page.keyboard.press('Backspace').catch(() => {});
+      await page.waitForTimeout(200);
+      await page.keyboard.type(String(caption || '').slice(0, 2200), { delay: 5 });
+      captionFilled = true;
+      console.log(`  [debug] Caption filled via selector: ${selector}`);
+      break;
+    }
+
+    if (!captionFilled) {
+      throw new Error('Instagram caption entry failed: no visible caption input matched current UI');
+    }
     await page.waitForTimeout(1000);
 
     await saveDebugScreenshot(page, '04-before-share');

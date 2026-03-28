@@ -29,7 +29,16 @@
     "autopost:tiktok:video": "node code/posting/auto-post-tiktok-ai-video.js",
     "post:x": "node code/posting/post-to-x.js",
     "autopost:x": "node code/posting/auto-post-x.js",
-    "autopost:x:video": "node code/posting/auto-post-x-ai-video.js"
+    "autopost:x:video": "node code/posting/auto-post-x-ai-video.js",
+    "docker:build": "docker compose build autopost",
+    "docker:instagram:morning": "docker compose run --rm --no-deps autopost node code/posting/run-instagram-slot.js morning",
+    "docker:instagram:midday": "docker compose run --rm --no-deps autopost node code/posting/run-instagram-slot.js midday",
+    "docker:instagram:evening": "docker compose run --rm --no-deps autopost node code/posting/run-instagram-slot.js evening",
+    "docker:x:morning": "docker compose run --rm --no-deps autopost node code/posting/run-x-slot.js morning",
+    "docker:x:midday": "docker compose run --rm --no-deps autopost node code/posting/run-x-slot.js midday",
+    "docker:x:evening": "docker compose run --rm --no-deps autopost node code/posting/run-x-slot.js evening",
+    "docker:tiktok:morning": "docker compose run --rm --no-deps autopost node code/posting/run-tiktok-slot.js morning",
+    "docker:tiktok:evening": "docker compose run --rm --no-deps autopost node code/posting/run-tiktok-slot.js evening"
   },
   "dependencies": {
     "axios": "^1.13.4",

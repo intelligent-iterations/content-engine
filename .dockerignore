@@ -1,0 +1,11 @@
+.git
+.venv
+node_modules
+output
+downloads
+auth
+cookies
+research
+.env
+*.log
+.DS_Store

@@ -1,6 +1,11 @@
 # Launchd Scheduling
 
-This folder contains ready-to-load macOS `launchd` agents for the default weekly queue plan:
+This folder contains ready-to-load macOS `launchd` agents for the default weekly queue plan.
+
+The schedulers now invoke Dockerized slot jobs, not the host Node process directly. Resource caps live in [`docker-compose.yml`](../docker-compose.yml):
+
+- `autopost`: `2 vCPU`, `3 GB RAM`
+- `generate`: `2 vCPU`, `4 GB RAM`
 
 - Instagram: `3` posts/day
 - X: `3` posts/day
@@ -17,11 +22,19 @@ The queue state lives in:
 - `output/scheduled_videos/<slug>/schedule.json`
 - `output/scheduled_carousels/<slug>/schedule.json`
 
-Each agent runs one slot-specific command:
+Each agent runs one slot-specific Docker command through [`scripts/docker-slot.sh`](../scripts/docker-slot.sh):
 
-- `node code/posting/run-instagram-slot.js <morning|midday|evening>`
-- `node code/posting/run-x-slot.js <morning|midday|evening>`
-- `node code/posting/run-tiktok-slot.js <morning|evening>`
+- `docker compose run --rm --no-deps autopost node code/posting/run-instagram-slot.js <morning|midday|evening>`
+- `docker compose run --rm --no-deps autopost node code/posting/run-x-slot.js <morning|midday|evening>`
+- `docker compose run --rm --no-deps autopost node code/posting/run-tiktok-slot.js <morning|evening>`
+
+## Build
+
+Before the schedulers can run, build the image once:
+
+```bash
+docker compose build
+```
 
 ## Install
 
@@ -51,6 +64,15 @@ launchctl list | grep contentengine
 tail -f output/logs/instagram-morning.log
 tail -f output/logs/x-midday.log
 tail -f output/logs/tiktok-evening.log
+```
+
+## Manual Runs
+
+```bash
+npm run docker:build
+npm run docker:instagram:morning
+npm run docker:x:midday
+npm run docker:tiktok:evening
 ```
 
 ## Remove

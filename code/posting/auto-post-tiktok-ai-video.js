@@ -56,6 +56,10 @@ async function postOneVideo(item) {
     headless: true,
   });
 
+  if (!result?.verified) {
+    throw new Error(`TikTok post was not verified: ${result?.postUrl || 'no permalink returned'}`);
+  }
+
   const postId = result.postUrl.split('/').filter(Boolean).pop() || `tiktok-video-${Date.now()}`;
   updateScheduledPlatformPost('video', item.dir, 'tiktok', {
     post_id: postId,

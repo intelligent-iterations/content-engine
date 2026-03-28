@@ -64,8 +64,10 @@ YOUTUBE_POSTED_VIDEOS.md
 AI_VIDEOS.md
 V3_SLIDESHOWS_POSTED.md
 
-# LaunchD plists (contain local paths)
+# LaunchD plists
+# Ignore local installed copies, but keep repo templates under launchd/.
 *.plist
+!launchd/*.plist
 
 # Generated media exports
 *.mp4

@@ -57,6 +57,11 @@ async function postOneVideo(item) {
     mediaPaths: [videoFilePath],
     headless: true,
   });
+
+  if (!result?.verified) {
+    throw new Error(`Instagram post was not verified: ${result?.postUrl || 'no permalink returned'}`);
+  }
+
   const postId = result.postUrl.split('/').filter(Boolean).pop() || `instagram-reel-${Date.now()}`;
   updateScheduledPlatformPost('video', item.dir, 'instagram', {
     post_id: postId,

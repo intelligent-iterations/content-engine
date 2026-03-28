@@ -27,7 +27,7 @@ Everything is **template-first** — your ideas become reusable formats, not thr
 
 - **Videos** — short-form viral clips, multi-clip story arcs, promos, character pieces, ASMR-style content
 - **Carousels** — educational breakdowns, comparison lists, product showcases
-- **Auto-captioned assets** — captions baked into every video workflow
+- **Auto-captioned assets** — post captions plus burned-in on-video dialogue captions for video workflows
 - **Scheduled posts** — queue approved content for TikTok, Instagram, and X
 
 ## Quick Start
@@ -62,6 +62,10 @@ generate a 3-clip promo video for a local bakery
 3. **Grok generates** images and video clips from the template's prompt contract
 4. **The pipeline stitches** clips, adds captions, and saves all artifacts
 5. **You approve** and the agent queues the asset for scheduled posting
+
+For video work, the agent can scaffold a saved compilation markdown and `asset-manifest.json` from the selected template before rendering. That makes formats like fruit drama reusable without hardcoding fruit-specific logic into the renderer.
+
+The repo now also has a higher-level video workflow CLI for `prepare`, `render`, `queue`, and `ship`, so the operational path is: define the reusable template/run artifacts, render the output, then move it into the scheduled posting queue.
 
 ## Auth Model
 
