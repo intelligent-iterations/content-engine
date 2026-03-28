@@ -1,12 +1,13 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-import axios from 'axios';
 import { parseCompilationMD, generateClip, stitchClips, lastHit429 } from './generate-video-compilation.js';
 import { burnCaptions } from './add-captions.js';
 import {
-  buildCaptionPrompt,
+  buildCompilationScaffold,
   buildVideoResearchArtifact,
+  getCompilationRequirements,
+  getTemplateAuthoringSections,
   listTemplates,
   prependCompilationMeta,
   resolveGenerationSettings,
@@ -14,6 +15,7 @@ import {
 } from './template-registry.js';
 import { VIDEOS_DIR, isMainModule } from '../core/paths.js';
 import { buildVideoCaption } from '../shared/caption-writer.js';
+import { writeAssetManifestIfMissing } from './asset-manifest.js';
 
 const XAI_API_KEY = process.env.XAI_API_KEY;
 
@@ -58,9 +60,92 @@ function parseArgs(args) {
   return opts;
 }
 
-function validateCompilationMD(mdContent, expectedClips) {
+function countWords(value) {
+  return String(value || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseClipHeader(firstLine) {
+  const header = firstLine.trim();
+  const match = header.match(/^(.*?)\s*--\s*(.+)$/);
+
+  if (!match) {
+    return {
+      name: header,
+      mood: null,
+    };
+  }
+
+  return {
+    name: match[1].trim(),
+    mood: match[2].trim(),
+  };
+}
+
+function extractSectionBody(mdContent, sectionTitle) {
+  const escapedTitle = escapeRegex(sectionTitle);
+  const regex = new RegExp(`(?:^|\\n)## ${escapedTitle}\\s*\\n([\\s\\S]*?)(?=\\n## |\\n# |$)`);
+  const match = mdContent.match(regex);
+  return match ? match[1].trim() : '';
+}
+
+function isPlaceholderBody(body) {
+  const normalized = String(body || '').trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+
+  return normalized.startsWith('describe ')
+    || normalized.startsWith('list ')
+    || normalized.startsWith('name ')
+    || normalized.startsWith('note ')
+    || normalized.startsWith('record ')
+    || normalized.startsWith('capture ')
+    || normalized.startsWith('define ')
+    || normalized.startsWith('replace the placeholders');
+}
+
+function extractPromptMetadata(prompt) {
+  const text = String(prompt || '').trim();
+  const speaker = text.match(/(?:^|\n)Speaker:\s*(.+)$/im)?.[1]?.trim() || '';
+  const dialogue = text.match(/(?:^|\n)Dialogue:\s*"([^"]+)"/im)?.[1]?.trim() || '';
+  return { speaker, dialogue };
+}
+
+function validateCompilationMD(mdContent, expectedClips, resolvedTemplate) {
   const errors = [];
+  const { promptRequirements, markdownContract } = getCompilationRequirements();
+  const authoringSections = getTemplateAuthoringSections(resolvedTemplate?.template);
   const clipHeaders = mdContent.match(/^## Clip \d+:/gm) || [];
+  const requiredSections = markdownContract.required_sections || [];
+  const imageMinWords = promptRequirements?.image_prompt_word_range?.min || 0;
+  const videoMinWords = promptRequirements?.video_prompt_word_range?.min || 0;
+  const fallbackMinWords = promptRequirements?.fallback_video_prompt_word_range?.min || 0;
+
+  for (const authoringSection of authoringSections) {
+    if (!authoringSection.required) {
+      continue;
+    }
+
+    const body = extractSectionBody(mdContent, authoringSection.title);
+    if (!body) {
+      errors.push(`Missing required authoring section: ## ${authoringSection.title}.`);
+      continue;
+    }
+
+    if (isPlaceholderBody(body)) {
+      errors.push(`Authoring section "${authoringSection.title}" still contains scaffold placeholder text.`);
+      continue;
+    }
+
+    const wordCount = countWords(body);
+    if (authoringSection.min_words && wordCount < authoringSection.min_words) {
+      errors.push(`Authoring section "${authoringSection.title}" is too short (${wordCount} words, need ${authoringSection.min_words}+).`);
+    }
+  }
 
   if (clipHeaders.length === 0) {
     errors.push('No "## Clip N:" headers found. Each clip must start with "## Clip 1:", "## Clip 2:", etc.');
@@ -76,88 +161,76 @@ function validateCompilationMD(mdContent, expectedClips) {
   for (let i = 0; i < clipSections.length; i++) {
     const section = clipSections[i];
     const clipNum = i + 1;
+    const sectionMatches = {};
 
-    const continuityMatch = section.match(/### Continuity Anchors\s*```\s*([\s\S]*?)```/);
-    if (!continuityMatch) {
-      errors.push(`Clip ${clipNum}: Missing ### Continuity Anchors with code block.`);
-    } else if (continuityMatch[1].trim().split(/\s+/).filter(Boolean).length < 15) {
+    for (const requiredSection of requiredSections) {
+      const matcher = new RegExp(`### ${escapeRegex(requiredSection)}\\s*\`\`\`\\s*([\\s\\S]*?)\`\`\``);
+      const match = section.match(matcher);
+      if (!match) {
+        errors.push(`Clip ${clipNum}: Missing ### ${requiredSection} with code block.`);
+      } else {
+        sectionMatches[requiredSection] = match[1].trim();
+      }
+    }
+
+    const continuityWords = countWords(sectionMatches['Continuity Anchors']);
+    if (sectionMatches['Continuity Anchors'] && continuityWords < 15) {
       errors.push(`Clip ${clipNum}: Continuity anchors are too short.`);
     }
 
-    const imageMatch = section.match(/### Image Prompt\s*```\s*([\s\S]*?)```/);
-    if (!imageMatch) {
-      errors.push(`Clip ${clipNum}: Missing ### Image Prompt with code block.`);
-    } else {
-      const imageWords = imageMatch[1].trim().split(/\s+/).filter(Boolean).length;
-      if (imageWords < 70) {
-        errors.push(`Clip ${clipNum}: Image prompt is too short (${imageWords} words, need 70+).`);
+    const imageWords = countWords(sectionMatches['Image Prompt']);
+    if (sectionMatches['Image Prompt'] && imageWords < imageMinWords) {
+      errors.push(`Clip ${clipNum}: Image prompt is too short (${imageWords} words, need ${imageMinWords}+).`);
+    }
+
+    const videoPrompt = sectionMatches['Video Prompt'];
+    const videoWords = countWords(videoPrompt);
+    if (videoPrompt && videoWords < videoMinWords) {
+      errors.push(`Clip ${clipNum}: Video prompt is too short (${videoWords} words, need ${videoMinWords}+).`);
+    }
+
+    const fallbackPrompt = sectionMatches['Fallback Video Prompt'];
+    const fallbackWords = countWords(fallbackPrompt);
+    if (fallbackPrompt && fallbackWords < fallbackMinWords) {
+      errors.push(`Clip ${clipNum}: Fallback video prompt is too short (${fallbackWords} words, need ${fallbackMinWords}+).`);
+    }
+
+    if (markdownContract.dialogue_in_video_prompt_required && videoPrompt && !videoPrompt.includes('"')) {
+      errors.push(`Clip ${clipNum}: Video prompt must contain dialogue in quotes.`);
+    }
+
+    if (markdownContract.speaker_tag_in_video_prompt_required && videoPrompt) {
+      const { speaker, dialogue } = extractPromptMetadata(videoPrompt);
+      if (!speaker) {
+        errors.push(`Clip ${clipNum}: Video prompt must include "Speaker: <name or None>".`);
+      }
+      if (dialogue && /^none$/i.test(speaker)) {
+        errors.push(`Clip ${clipNum}: Video prompt cannot use Speaker: None when dialogue is present.`);
       }
     }
 
-    const videoMatch = section.match(/### Video Prompt\s*```\s*([\s\S]*?)```/);
-    if (!videoMatch) {
-      errors.push(`Clip ${clipNum}: Missing ### Video Prompt with code block.`);
-    } else {
-      const videoPrompt = videoMatch[1].trim();
-      const videoWords = videoPrompt.split(/\s+/).filter(Boolean).length;
-      if (videoWords < 35) {
-        errors.push(`Clip ${clipNum}: Video prompt is too short (${videoWords} words, need 35+).`);
-      }
-      if (!videoPrompt.includes('"')) {
-        errors.push(`Clip ${clipNum}: Video prompt must contain dialogue in quotes.`);
-      }
+    if (markdownContract.dialogue_in_fallback_prompt_required && fallbackPrompt && !fallbackPrompt.includes('"')) {
+      errors.push(`Clip ${clipNum}: Fallback video prompt must contain dialogue in quotes.`);
     }
 
-    const fallbackMatch = section.match(/### Fallback Video Prompt\s*```\s*([\s\S]*?)```/);
-    if (!fallbackMatch) {
-      errors.push(`Clip ${clipNum}: Missing ### Fallback Video Prompt with code block.`);
-    } else {
-      const fallbackPrompt = fallbackMatch[1].trim();
-      const fallbackWords = fallbackPrompt.split(/\s+/).filter(Boolean).length;
-      if (fallbackWords < 25) {
-        errors.push(`Clip ${clipNum}: Fallback video prompt is too short (${fallbackWords} words, need 25+).`);
+    if (markdownContract.speaker_tag_in_fallback_prompt_required && fallbackPrompt) {
+      const { speaker, dialogue } = extractPromptMetadata(fallbackPrompt);
+      if (!speaker) {
+        errors.push(`Clip ${clipNum}: Fallback video prompt must include "Speaker: <name or None>".`);
       }
-      if (!fallbackPrompt.includes('"')) {
-        errors.push(`Clip ${clipNum}: Fallback video prompt must contain dialogue in quotes.`);
+      if (dialogue && /^none$/i.test(speaker)) {
+        errors.push(`Clip ${clipNum}: Fallback video prompt cannot use Speaker: None when dialogue is present.`);
       }
     }
 
     const firstLine = section.split('\n')[0].trim();
-    if (!firstLine.includes('Wonder') && !firstLine.includes('Fear')) {
-      errors.push(`Clip ${clipNum}: Missing mood marker (Wonder or Fear) in clip header.`);
+    const parsedHeader = parseClipHeader(firstLine);
+    if (markdownContract.requires_mood_marker && !parsedHeader.mood) {
+      errors.push(`Clip ${clipNum}: Missing mood marker in clip header. Use "${markdownContract.clip_header_pattern || '## Clip N: Name -- Mood'}".`);
     }
   }
 
   return errors;
-}
-
-async function generateCaption(topic, clips, resolvedTemplate) {
-  if (!XAI_API_KEY) {
-    throw new Error('Missing XAI_API_KEY in .env');
-  }
-
-  const { systemPrompt, userPrompt } = buildCaptionPrompt({
-    topic,
-    clips,
-    template: resolvedTemplate?.template || {},
-  });
-
-  const res = await axios.post('https://api.x.ai/v1/chat/completions', {
-    model: 'grok-4-1-fast',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    max_tokens: 1000,
-    temperature: 0.8,
-  }, {
-    headers: {
-      Authorization: `Bearer ${XAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  return res.data.choices[0].message.content;
 }
 
 function topicSlug(topic) {
@@ -182,25 +255,17 @@ function safeOutputName(value, fallback = 'video') {
   return normalized || fallback;
 }
 
-async function generateCaptionViaBrowser({ topic, clips, resolvedTemplate }) {
-  return buildVideoCaption({
-    topic,
-    clips,
-    template: resolvedTemplate?.template || {},
-  });
-}
-
 function withUpdatedFrontmatter(mdContent, settings) {
   const stripped = String(mdContent || '').replace(/^---\n[\s\S]*?\n---\n*/, '');
   return prependCompilationMeta(stripped, settings);
 }
 
 function resolveCompilationArtifactPath({ topic, outputName, md }) {
-  const baseName = safeOutputName(outputName || topicSlug(topic), 'video');
-  const defaultVideoDir = path.join(VIDEOS_DIR, baseName);
+  const requestedBaseName = safeOutputName(outputName || topicSlug(topic), 'video');
   const mdPath = md
     ? path.resolve(md)
-    : path.join(defaultVideoDir, `${baseName}.md`);
+    : path.join(VIDEOS_DIR, requestedBaseName, `${requestedBaseName}.md`);
+  const baseName = path.basename(mdPath, path.extname(mdPath));
 
   return {
     baseName,
@@ -209,17 +274,33 @@ function resolveCompilationArtifactPath({ topic, outputName, md }) {
   };
 }
 
-function loadCompilationArtifacts({ topic, settings, outputName, md }) {
+function loadCompilationArtifacts({ topic, settings, resolvedTemplate, outputName, md }) {
   const resolved = resolveCompilationArtifactPath({ topic, outputName, md });
 
   if (!fs.existsSync(resolved.mdPath)) {
+    fs.mkdirSync(resolved.videosDir, { recursive: true });
+    fs.writeFileSync(
+      resolved.mdPath,
+      buildCompilationScaffold({
+        topic,
+        resolvedTemplate,
+        settings,
+      })
+    );
+    const manifestPath = writeAssetManifestIfMissing({
+      topic,
+      resolvedTemplate,
+      settings,
+      videosDir: resolved.videosDir,
+      mdPath: resolved.mdPath,
+    });
     throw new Error(
-      `Missing compilation markdown: ${resolved.mdPath}\nCreate the shot-plan markdown locally first, then rerun the video renderer.`
+      `Missing compilation markdown: ${resolved.mdPath}\nScaffolded a starter markdown and asset manifest:\n- ${resolved.mdPath}\n- ${manifestPath}\nFill them in, then rerun the video renderer.`
     );
   }
 
   const mdContent = fs.readFileSync(resolved.mdPath, 'utf8');
-  const validationErrors = validateCompilationMD(mdContent, settings.clipCount);
+  const validationErrors = validateCompilationMD(mdContent, settings.clipCount, resolvedTemplate);
   if (validationErrors.length > 0) {
     throw new Error(
       `Compilation markdown failed validation:\n${validationErrors.map((error) => `- ${error}`).join('\n')}`
@@ -228,6 +309,13 @@ function loadCompilationArtifacts({ topic, settings, outputName, md }) {
 
   fs.mkdirSync(resolved.videosDir, { recursive: true });
   fs.writeFileSync(resolved.mdPath, withUpdatedFrontmatter(mdContent, settings));
+  writeAssetManifestIfMissing({
+    topic,
+    resolvedTemplate,
+    settings,
+    videosDir: resolved.videosDir,
+    mdPath: resolved.mdPath,
+  });
 
   return resolved;
 }
@@ -307,7 +395,7 @@ async function runClipPipeline({ mdPath, baseName, videosDir, settings, dryRun }
   }
 
   const finalPath = path.join(videosDir, `${baseName}.mp4`);
-  console.log('\n[5/5] Burning captions into video...');
+  console.log('\n[5/5] Burning on-video dialogue captions...');
   try {
     await burnCaptions({
       mdPath,
@@ -364,6 +452,7 @@ export async function main(argv = process.argv.slice(2)) {
     resolvedArtifacts = loadCompilationArtifacts({
       topic: opts.topic,
       settings,
+      resolvedTemplate,
       outputName: opts.outputName,
       md: opts.md,
     });
@@ -385,22 +474,13 @@ export async function main(argv = process.argv.slice(2)) {
   });
   console.log(`[2/5] Saved research artifact: ${researchPath}\n`);
 
-  console.log('[3/5] Generating caption...');
+  console.log('[3/5] Generating post caption...');
   const parsedForCaption = parseCompilationMD(mdPath);
   try {
-    const seedCaption = XAI_API_KEY
-      ? await generateCaption(opts.topic, parsedForCaption, resolvedTemplate)
-      : await generateCaptionViaBrowser({
-        topic: opts.topic,
-        clips: parsedForCaption,
-        resolvedTemplate,
-      });
-
     const caption = buildVideoCaption({
       topic: opts.topic,
       clips: parsedForCaption,
       template: resolvedTemplate?.template || {},
-      seedCaption,
     });
 
     const captionPath = path.join(videosDir, `${baseName}_caption.txt`);

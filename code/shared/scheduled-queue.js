@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import {
   CAROUSELS_DIR,
   ROOT_DIR,
@@ -9,6 +10,13 @@ import {
 } from '../core/paths.js';
 
 const SCHEDULE_FILE = 'schedule.json';
+const DEFAULT_POST_OUTRO_PATH = '/Users/admin/Documents/plug.mov';
+const DEFAULT_POST_CAPTION_LINE = 'Search ii-content-engine on GitHub.';
+const LEGACY_POST_CAPTION_PATTERNS = [
+  /make these videos using content engine on github!? just search up ii content engine\.?/i,
+  /make these videos using content engine on github!? just search up content-engine\.?/i,
+  /search ii-content-engine on github\.?/i,
+];
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -131,6 +139,49 @@ function copyFileIfPresent(fromPath, toPath) {
   }
 }
 
+function normalizeCaptionForPosting(caption) {
+  const body = String(caption || '')
+    .split('\n')
+    .filter((line) => !LEGACY_POST_CAPTION_PATTERNS.some((pattern) => pattern.test(line.trim())))
+    .join('\n')
+    .trim();
+  const promo = DEFAULT_POST_CAPTION_LINE;
+
+  if (!body) {
+    return promo;
+  }
+
+  const lines = body.split('\n').map(line => line.trim());
+  if (lines[0]?.toLowerCase() === promo.toLowerCase()) {
+    return body;
+  }
+
+  return `${promo}\n\n${body}`;
+}
+
+function appendPostOutro(sourceVideoPath, targetVideoPath) {
+  if (!fs.existsSync(DEFAULT_POST_OUTRO_PATH)) {
+    throw new Error(`Required post outro clip not found: ${DEFAULT_POST_OUTRO_PATH}`);
+  }
+
+  execFileSync('ffmpeg', [
+    '-y',
+    '-i', sourceVideoPath,
+    '-i', DEFAULT_POST_OUTRO_PATH,
+    '-filter_complex', '[0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[v][a]',
+    '-map', '[v]',
+    '-map', '[a]',
+    '-c:v', 'libx264',
+    '-preset', 'medium',
+    '-crf', '20',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    '-b:a', '192k',
+    '-movflags', '+faststart',
+    targetVideoPath,
+  ], { stdio: 'pipe' });
+}
+
 export function scheduleVideo(sourceDir, options = {}) {
   const resolvedSource = path.resolve(sourceDir);
   const assets = detectVideoAssets(resolvedSource);
@@ -142,8 +193,13 @@ export function scheduleVideo(sourceDir, options = {}) {
   const targetCaptionPath = path.join(targetDir, `${slug}_caption.txt`);
   const targetMdPath = path.join(targetDir, `${slug}.md`);
 
-  fs.copyFileSync(assets.videoPath, targetVideoPath);
-  copyFileIfPresent(assets.captionPath, targetCaptionPath);
+  appendPostOutro(assets.videoPath, targetVideoPath);
+
+  if (assets.captionPath && fs.existsSync(assets.captionPath)) {
+    const caption = fs.readFileSync(assets.captionPath, 'utf8');
+    fs.writeFileSync(targetCaptionPath, normalizeCaptionForPosting(caption));
+  }
+
   copyFileIfPresent(assets.mdPath, targetMdPath);
 
   const manifest = {

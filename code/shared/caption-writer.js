@@ -1,6 +1,7 @@
 const DEFAULT_MIN_CAPTION_CHARS = 2100;
 const DEFAULT_MAX_CAPTION_CHARS = 2200;
 const DEFAULT_HASHTAG_COUNT = 5;
+const DEFAULT_VIDEO_PROMO_LINE = 'Search ii-content-engine on GitHub.';
 
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'at', 'be', 'but', 'by', 'for', 'from', 'how', 'i', 'if',
@@ -289,7 +290,6 @@ export function buildVideoCaption({
   topic,
   clips = [],
   template = {},
-  seedCaption = '',
   minChars = DEFAULT_MIN_CAPTION_CHARS,
   maxChars = DEFAULT_MAX_CAPTION_CHARS,
 }) {
@@ -301,12 +301,10 @@ export function buildVideoCaption({
     extras: clipSummary
   });
   const seoPhrases = buildSeoPhrases(cleanTopic, clipSummary);
-  const seed = cleanText(seedCaption);
-  const hookLine = seed
-    ? toSentence(seed.split('\n')[0])
-    : toSentence(`This reel is built around ${cleanTopic.toLowerCase()} and is written to be searchable, specific, and easy to reshare`);
+  const hookLine = toSentence(`This reel is built around ${cleanTopic.toLowerCase()} and is written to be searchable, specific, and easy to reshare`);
 
   const bodyParagraphs = [
+    DEFAULT_VIDEO_PROMO_LINE,
     hookLine,
     toSentence(`If you searched for ${cleanTopic.toLowerCase()}, this caption is meant to work harder than a generic teaser. It is here to reinforce the topic, describe the payoff in plain language, and give the post enough useful context to perform better across TikTok, Reels, and short-form search`),
     clipSummary.length
@@ -317,10 +315,6 @@ export function buildVideoCaption({
     toSentence(`A strong reel caption should help with discovery, retention, and saves at the same time. It should front-load the hook, reinforce the payoff, add context the visuals do not have room to say, and still end with a clear action for the audience`),
     toSentence(`Save this if you want a quick reference, send it to someone who would care about ${cleanTopic.toLowerCase()}, and use it as a reminder that stronger captions are not just decoration. They help the post index for the right phrases and give the viewer a reason to come back`)
   ];
-
-  if (seed) {
-    bodyParagraphs.splice(1, 0, toSentence(`Original caption angle: ${seed}`));
-  }
 
   const expanded = padParagraphsToMinimum(bodyParagraphs, minChars, (index) => (
     `Search-friendly expansion ${index - bodyParagraphs.length + 1}: ${seoPhrases[index % seoPhrases.length]} ` +

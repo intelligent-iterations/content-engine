@@ -114,8 +114,6 @@ tmp-*.mjs
 run_*.sh
 
 # Templates
-prompts/video-templates.json
-prompts/carousel-templates.json
 
 # Research
 research/*

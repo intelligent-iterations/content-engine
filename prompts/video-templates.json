@@ -1,0 +1,280 @@
+{
+  "defaults": {
+    "clip_count": 5,
+    "clip_duration_seconds": 6,
+    "target_length_seconds": 30,
+    "reference_strategy": "shared_reference",
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "image_model": "grok-imagine-image",
+    "video_model": "grok-imagine-video"
+  },
+  "ai_prompt_contract": {
+    "grok_prompt_requirements": {
+      "image_prompt_word_range": {
+        "min": 70,
+        "max": 180
+      },
+      "video_prompt_word_range": {
+        "min": 35,
+        "max": 110
+      },
+      "fallback_video_prompt_word_range": {
+        "min": 25,
+        "max": 80
+      }
+    },
+    "compilation_markdown": {
+      "clip_header_pattern": "## Clip N: Name -- Mood",
+      "requires_mood_marker": true,
+      "required_sections": [
+        "Continuity Anchors",
+        "Image Prompt",
+        "Video Prompt",
+        "Fallback Video Prompt"
+      ],
+      "dialogue_in_video_prompt_required": true,
+      "dialogue_in_fallback_prompt_required": true,
+      "speaker_tag_in_video_prompt_required": true,
+      "speaker_tag_in_fallback_prompt_required": true
+    },
+    "rule_profiles": {
+      "general_story": {
+        "system_prompt": "You are an expert short-form video strategist. Build emotionally legible, continuity-safe scene plans for stitched six-second AI video clips.",
+        "core_rules": [
+          "Keep recurring characters visually stable across clips.",
+          "Favor one dominant action per clip.",
+          "Preserve setting, wardrobe, silhouette, and lighting logic unless the beat requires a deliberate change.",
+          "Use simple spoken lines and let visuals carry the scene."
+        ]
+      },
+      "promo": {
+        "system_prompt": "You are an expert short-form promo strategist. Build concise, conversion-oriented video beats.",
+        "core_rules": [
+          "Keep visuals simple and product legible.",
+          "Lead with a hook inside the first clip.",
+          "Use direct benefit language.",
+          "Preserve style consistency across the sequence."
+        ]
+      }
+    },
+    "caption_profiles": {
+      "general_story": {
+        "system_prompt": "Write a short-form social caption for a dramatic AI video. The caption should read naturally, front-load the hook, stay searchable, and feel native to TikTok, Reels, and Shorts.",
+        "topic_intro": "Write a caption for this AI video topic: {topic}",
+        "clip_intro": "The video contains these clips:",
+        "preface": [
+          "Write in a high-retention short-form voice.",
+          "The first 125 characters should carry the hook.",
+          "Make the caption search-friendly without sounding robotic."
+        ],
+        "sections": [
+          {
+            "title": "Hook",
+            "instruction": "Open with the betrayal twist or emotional hook in one or two punchy sentences."
+          },
+          {
+            "title": "Story",
+            "instruction": "Summarize the arc so the viewer understands the setup, reveal, and payoff."
+          },
+          {
+            "title": "Search",
+            "instruction": "Include natural phrasing around AI video, short drama, character story, betrayal arc, or similar discoverable language."
+          },
+          {
+            "title": "CTA",
+            "instruction": "End with a save/share/comment style call to action."
+          }
+        ],
+        "important_rules": [
+          "No markdown.",
+          "No bullet points.",
+          "No quotation marks around the full caption.",
+          "Keep it platform-native and emotionally clear."
+        ]
+      },
+      "promo": {
+        "system_prompt": "Write a short-form promo caption with a strong hook, concise offer framing, and a clear call to action.",
+        "topic_intro": "Write a promo caption for this topic: {topic}",
+        "clip_intro": "The video contains these beats:",
+        "preface": [
+          "Front-load the main benefit.",
+          "Keep the caption skimmable and searchable."
+        ],
+        "sections": [
+          {
+            "title": "Hook",
+            "instruction": "Start with the core promise or surprise."
+          },
+          {
+            "title": "Value",
+            "instruction": "Explain the benefit quickly."
+          },
+          {
+            "title": "CTA",
+            "instruction": "Tell the viewer what to do next."
+          }
+        ],
+        "important_rules": [
+          "No markdown.",
+          "No bullet points.",
+          "Keep it concise."
+        ]
+      }
+    }
+  },
+  "templates": [
+    {
+      "id": "anthropomorphic-fruit-infidelity-drama",
+      "label": "Anthropomorphic Fruit Infidelity Drama",
+      "description": "Continuity-sensitive five-beat fruit relationship drama built from locked cast sheets, scene start frames, and short stitched clips.",
+      "contract_version": 2,
+      "rule_profile": "general_story",
+      "caption_profile": "general_story",
+      "prompting_profile": "grok_fruit_character_drama",
+      "clip_count": 5,
+      "clip_duration_seconds": 6,
+      "target_length_seconds": 30,
+      "reference_strategy": "shared_reference",
+      "aspect_ratio": "9:16",
+      "resolution": "720p",
+      "image_model": "grok-imagine-image",
+      "video_model": "grok-imagine-video",
+      "format_hint": "anthropomorphic fruit betrayal story told as five tight cinematic beats with a locked fruit cast and emotional visual payoff",
+      "ordering_strategy": "opening, suspicion, discovery, confrontation, aftermath",
+      "voice_direction": "high-drama, visually legible, simple dialogue, one named speaker per clip, explicit silent-character control, mobile-readable emotions, one dominant action per beat",
+      "research_notes": [
+        "Start with a strict character turnaround sheet so Grok has a stable visual anchor before scene rendering.",
+        "Keep wardrobe, fruit type, facial geometry, and body proportions fixed across all scenes.",
+        "Use scene start frames with attached cast references whenever multiple fruit characters appear together.",
+        "Favor short dialogue and let reaction acting, props, and framing carry the betrayal story.",
+        "When multiple fruit characters are on-screen, assign exactly one named speaker per clip and explicitly mark the others as silent."
+      ],
+      "creative_direction": [
+        "Use polished stylized 3D character design with readable fruit textures and expressive cartoon-human eyes.",
+        "Build immediate silhouette contrast between the betrayed partner, cheating partner, third party, and witness.",
+        "Keep the locations simple and upscale so props like a phone, doorway, office desk, or café table read instantly on mobile."
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "define the recurring fruit cast",
+          "generate one portrait and one turnaround/reference sheet per recurring character",
+          "author a five-beat story markdown from saved repo state",
+          "generate one scene start frame per clip using cast references",
+          "animate each scene frame into a short clip with simple dialogue",
+          "stitch clips, burn captions, and save the final run artifacts"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card per clip with image-first continuity locking"
+      },
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the fruit-drama concept, hook, and emotional payoff in 2-4 sentences. State why this cast contrast is legible at a glance on Shorts/Reels/TikTok.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Fruit Cast Sheet",
+          "instruction": "List every recurring fruit character by fruit type, name, role, outfit, emotional energy, and locked visual details. Keep wardrobe and silhouette rules explicit.",
+          "required": true,
+          "min_words": 60
+        },
+        {
+          "title": "Location Lock",
+          "instruction": "Name the recurring locations and specify the props, lighting logic, and color accents that should stay consistent across clips.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Specify which portrait assets, turnaround/reference sheets, and scene start frames must exist before rendering. Mention which scenes need multiple character references attached.",
+          "required": true,
+          "min_words": 45
+        }
+      ],
+      "asset_contract": {
+        "requires_character_assets": true,
+        "requires_scene_start_frames": true,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": true,
+        "requires_locked_wardrobe": true,
+        "requires_role_assignment": true,
+        "minimum_cast_size": 4,
+        "role_blueprint": [
+          {
+            "role": "betrayed_partner",
+            "energy": "soft, warm, trusting, the emotional anchor viewers root for",
+            "good_picks": [
+              "peach",
+              "strawberry",
+              "cherry"
+            ]
+          },
+          {
+            "role": "cheating_partner",
+            "energy": "smooth, charming, distant, two-faced under pressure",
+            "good_picks": [
+              "lemon",
+              "lime",
+              "pear"
+            ]
+          },
+          {
+            "role": "third_party",
+            "energy": "bold, glamorous, seductive, visually distinct from the couple",
+            "good_picks": [
+              "mango",
+              "plum",
+              "grape"
+            ]
+          },
+          {
+            "role": "witness_ally",
+            "energy": "reliable, grounded, reveals the truth or comforts the betrayed partner",
+            "good_picks": [
+              "orange",
+              "kiwi",
+              "apple"
+            ]
+          }
+        ]
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "opening",
+          "suspicion",
+          "discovery",
+          "confrontation",
+          "aftermath"
+        ],
+        "scene_prompt_strategy": "each clip should open from a continuity-locked scene frame, then animate one dominant emotional action with clean staging, one named speaker at most, and explicit silent-character control"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "fruit identity",
+          "head geometry and facial features",
+          "wardrobe",
+          "body proportions",
+          "environment",
+          "color palette",
+          "lighting"
+        ]
+      },
+      "video_examples": [
+        "Clip 1 should establish the couple in a calm everyday setting before any reveal.",
+        "Clip 3 should make the discovery unmistakable with a readable prop or facial reaction.",
+        "Clip 4 should be the emotional peak with simple blocking and maximum clarity."
+      ],
+      "dialogue_examples": [
+        "\"Who is she?\"",
+        "\"You lied to me.\"",
+        "\"I saw everything.\""
+      ]
+    }
+  ]
+}

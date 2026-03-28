@@ -13,6 +13,30 @@ const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json')
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
 
+function normalizeImageModel(value) {
+  const model = String(value || '').trim();
+  if (!model) {
+    return 'grok-imagine-image';
+  }
+
+  const legacyAliases = new Set([
+    'grok',
+    'grok-image',
+    'grok-2-image'
+  ]);
+
+  return legacyAliases.has(model) ? 'grok-imagine-image' : model;
+}
+
+function normalizeVideoModel(value) {
+  const model = String(value || '').trim();
+  if (!model) {
+    return 'grok-imagine-video';
+  }
+
+  return model;
+}
+
 export const api = axios.create({
   baseURL: BASE_URL,
   headers: {
@@ -89,6 +113,12 @@ function buildGrokWebSessionArgs(sessionPath) {
 }
 
 function buildBrowserClipPrompt(clip, clipDurationSeconds) {
+  const speaker = clip.videoPrompt?.match(/(?:^|\n)Speaker:\s*(.+)$/im)?.[1]?.trim() || null;
+  const silentCharacters = clip.videoPrompt?.match(/(?:^|\n)Silent characters:\s*(.+)$/im)?.[1]?.trim() || null;
+  const dialogue = clip.videoPrompt?.match(/(?:^|\n)Dialogue:\s*"([^"]+)"/im)?.[1]?.trim() || null;
+  const action = clip.videoPrompt?.match(/(?:^|\n)Action:\s*(.+)$/im)?.[1]?.trim() || null;
+  const direction = clip.videoPrompt?.match(/(?:^|\n)Direction:\s*(.+)$/im)?.[1]?.trim() || null;
+
   return [
     'Create a vertical 9:16 video clip.',
     `Target duration: ${clipDurationSeconds} seconds.`,
@@ -107,7 +137,17 @@ function buildBrowserClipPrompt(clip, clipDurationSeconds) {
     'Animate that exact scene using this motion and dialogue direction:',
     '',
     'VIDEO DIRECTION:',
-    clip.videoPrompt,
+    speaker
+      ? `Only ${speaker} may deliver the spoken line in this clip.`
+      : 'If a spoken line is present, keep it assigned to one clearly readable speaker.',
+    silentCharacters && !/^none$/i.test(silentCharacters)
+      ? `${silentCharacters} stay on-screen silent and must not mouth or appear to say the line.`
+      : 'Any other visible characters stay silent unless the prompt explicitly says otherwise.',
+    dialogue
+      ? `Use exactly this spoken line: "${dialogue}"`
+      : 'Use no spoken dialogue unless the motion direction explicitly requires it.',
+    action || 'Keep one dominant visible action.',
+    direction || clip.videoPrompt,
     '',
     'Keep the framing, character, body-part context, and action clear and legible.',
     'Output a single finished video clip.'
@@ -287,6 +327,23 @@ function shouldRetryWithFallback(error) {
   );
 }
 
+function parseClipHeader(firstLine) {
+  const header = String(firstLine || '').trim();
+  const match = header.match(/^(.*?)\s*--\s*(.+)$/);
+
+  if (!match) {
+    return {
+      name: header,
+      mood: null,
+    };
+  }
+
+  return {
+    name: match[1].trim(),
+    mood: match[2].trim(),
+  };
+}
+
 // Parse the compilation MD file into structured clips
 export function parseCompilationMD(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
@@ -300,8 +357,9 @@ export function parseCompilationMD(filePath) {
 
     // Get clip name from first line
     const firstLine = section.split('\n')[0].trim();
-    clip.name = firstLine.replace(/\s*--\s*(Wonder|Fear).*/, '').trim();
-    clip.mood = firstLine.includes('Fear') ? 'fear' : 'wonder';
+    const parsedHeader = parseClipHeader(firstLine);
+    clip.name = parsedHeader.name;
+    clip.mood = parsedHeader.mood ? parsedHeader.mood.toLowerCase() : null;
 
     // Extract image prompt
     const imageMatch = section.match(/### Image Prompt\s*```\s*([\s\S]*?)```/);
@@ -335,7 +393,7 @@ export async function generateImage(prompt, clipName, options = {}) {
 
   const res = await withRetry(
     () => api.post('/images/generations', {
-      model: options.imageModel || 'grok-imagine-image',
+      model: normalizeImageModel(options.imageModel),
       prompt,
       n: 1,
       response_format: 'url',
@@ -357,7 +415,7 @@ export async function generateVideo(imageUrl, prompt, options = {}) {
 
   const res = await withRetry(
     () => api.post('/videos/generations', {
-      model: options.videoModel || 'grok-imagine-video',
+      model: normalizeVideoModel(options.videoModel),
       prompt,
       image: { url: imageUrl },
       duration: options.clipDurationSeconds || 6,

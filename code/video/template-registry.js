@@ -26,6 +26,43 @@ function getGrokPromptRequirements(registry) {
   return registry.ai_prompt_contract?.grok_prompt_requirements || null;
 }
 
+function getCompilationMarkdownContract(registry) {
+  return registry.ai_prompt_contract?.compilation_markdown || {};
+}
+
+function getTemplateContract(template) {
+  return {
+    contract_version: template.contract_version || 1,
+    authoring_sections: template.authoring_sections || [],
+    workflow_contract: template.workflow_contract || null,
+    asset_contract: template.asset_contract || null,
+    cast_contract: template.cast_contract || null,
+    scene_contract: template.scene_contract || null,
+    continuity_contract: template.continuity_contract || null,
+  };
+}
+
+function formatSectionTemplate(section) {
+  const lines = [`## ${section.title}`];
+  if (section.instruction) {
+    lines.push(section.instruction);
+  }
+
+  if (section.prompt) {
+    lines.push('');
+    lines.push(`Prompt: ${section.prompt}`);
+  }
+
+  if (section.items?.length) {
+    lines.push('');
+    for (const item of section.items) {
+      lines.push(`- ${item}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 export function listTemplates() {
   const registry = loadTemplateRegistry();
   return registry.templates.map(template => ({
@@ -79,7 +116,9 @@ export function buildCaptionPrompt({ topic, clips, template }) {
   const registry = loadTemplateRegistry();
   const captionProfileId = template.caption_profile || (template.rule_profile === 'promo' ? 'promo' : 'general_story');
   const profile = getCaptionProfile(registry, captionProfileId);
-  const clipSummary = clips.map((clip, index) => `${index + 1}. ${clip.name} (${clip.mood})`).join('\n');
+  const clipSummary = clips
+    .map((clip, index) => `${index + 1}. ${clip.name} (${clip.mood || 'neutral'})`)
+    .join('\n');
 
   const sectionLines = (profile.sections || []).map((section, index) => {
     const header = `${index + 1}. ${section.title}: ${section.instruction}`;
@@ -145,6 +184,91 @@ export function prependCompilationMeta(mdContent, settings) {
   return `${meta}${mdContent.trim()}\n`;
 }
 
+export function getCompilationRequirements() {
+  const registry = loadTemplateRegistry();
+  return {
+    promptRequirements: getGrokPromptRequirements(registry),
+    markdownContract: getCompilationMarkdownContract(registry),
+  };
+}
+
+export function buildCompilationScaffold({ topic, resolvedTemplate, settings }) {
+  const template = resolvedTemplate.template;
+  const templateContract = getTemplateContract(template);
+  const markdownContent = [];
+  const authoringSections = template.authoring_sections || [];
+  const storyBeats = template.scene_contract?.default_story_beats || [];
+
+  markdownContent.push(`# ${topic}`);
+  markdownContent.push('');
+  markdownContent.push(`Template: ${template.label}`);
+  markdownContent.push('');
+
+  for (const section of authoringSections) {
+    markdownContent.push(formatSectionTemplate(section));
+    markdownContent.push('');
+  }
+
+  if (storyBeats.length) {
+    markdownContent.push('## Story Beats');
+    markdownContent.push('Replace the placeholders with your actual beat plan before rendering.');
+    markdownContent.push('');
+    for (let i = 0; i < settings.clipCount; i++) {
+      const beatLabel = storyBeats[i] || `beat_${i + 1}`;
+      markdownContent.push(`${i + 1}. ${beatLabel}`);
+    }
+    markdownContent.push('');
+  }
+
+  markdownContent.push('## Template Contract Snapshot');
+  markdownContent.push('Reference this while authoring so the saved markdown stays aligned with the template.');
+  markdownContent.push('');
+  markdownContent.push('```json');
+  markdownContent.push(JSON.stringify(templateContract, null, 2));
+  markdownContent.push('```');
+  markdownContent.push('');
+
+  for (let i = 0; i < settings.clipCount; i++) {
+    const beat = storyBeats[i] || `Beat ${i + 1}`;
+    markdownContent.push(`## Clip ${i + 1}: ${beat} -- Mood`);
+    markdownContent.push('');
+    markdownContent.push('### Continuity Anchors');
+    markdownContent.push('```');
+    markdownContent.push('Lock recurring identity, wardrobe, environment, and style here.');
+    markdownContent.push('```');
+    markdownContent.push('');
+    markdownContent.push('### Image Prompt');
+    markdownContent.push('```');
+    markdownContent.push('Describe the exact first frame, cast, composition, lighting, environment, and visual style.');
+    markdownContent.push('```');
+    markdownContent.push('');
+    markdownContent.push('### Video Prompt');
+    markdownContent.push('```');
+    markdownContent.push('Speaker: <exact character name who speaks>');
+    markdownContent.push('Silent characters: <comma-separated on-screen characters who stay silent, or None>');
+    markdownContent.push('Dialogue: "<one short spoken line>"');
+    markdownContent.push('Action: <one dominant visible action>');
+    markdownContent.push('Direction: <brief acting, camera, and motion direction. Keep the scene legible and do not let silent characters mouth the line.>');
+    markdownContent.push('```');
+    markdownContent.push('');
+    markdownContent.push('### Fallback Video Prompt');
+    markdownContent.push('```');
+    markdownContent.push('Speaker: <exact character name who speaks>');
+    markdownContent.push('Silent characters: <comma-separated on-screen characters who stay silent, or None>');
+    markdownContent.push('Dialogue: "<same short spoken line>"');
+    markdownContent.push('Action: <simpler backup action>');
+    markdownContent.push('Direction: <brief backup direction with the same speaking assignment>');
+    markdownContent.push('```');
+    markdownContent.push('');
+  }
+
+  return prependCompilationMeta(markdownContent.join('\n').trim(), settings);
+}
+
+export function getTemplateAuthoringSections(template) {
+  return template?.authoring_sections || [];
+}
+
 export function buildVideoResearchArtifact({ topic, resolvedTemplate, settings, route }) {
   const registry = loadTemplateRegistry();
   const requirements = getGrokPromptRequirements(registry);
@@ -160,6 +284,7 @@ export function buildVideoResearchArtifact({ topic, resolvedTemplate, settings, 
       rule_profile: template.rule_profile || null,
       prompting_profile: template.prompting_profile || null,
       caption_profile: template.caption_profile || null,
+      contract: getTemplateContract(template),
     },
     render_settings: {
       clip_count: settings.clipCount,
