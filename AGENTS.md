@@ -28,6 +28,8 @@ For video runs, save:
 - `research.json`
 - `<slug>_caption.txt`
 - `asset-manifest.json`
+- `plans/tool-plan.json`
+- `plans/execution-plan.json`
 - `clips/`
 - `<slug>.mp4`
 
@@ -46,10 +48,27 @@ When the task matches, read and follow:
 - Carousel work:
   - `.claude/rules/carousel-template-first.md`
   - `.codex/rules/carousel-template-first.md`
+- Prompt best practices:
+  - `docs/prompts/STORY_CHARACTER_PROMPT_GUIDE.md`
+
+## Guidance Folders
+
+Treat this folder as the source of truth for reusable documentation guidance:
+
+- `docs/prompts/` for prompt-authoring guidance, asset-chain rules, and prompt best practices
+
+Before authoring prompts, assets, or render jobs:
+
+1. Check `docs/prompts/` for matching prompt guidance.
+2. If the task is a continuity-sensitive character story, follow the workflow chain:
+   `hero portrait -> derived character sheet -> scene start frames -> video`
+3. For continuity-sensitive character stories, run the asset executor path before rendering clips.
+4. For continuity-sensitive character stories, scene start frames should default to the approved ordered reference sheets for the visible characters. Do not auto-expand scene references back into sibling hero portraits unless the template explicitly needs that.
 
 ## Default Behavior
 
 - New reusable video concepts should usually become templates.
+- If the user request matches a saved prompt-best-practices guide, read the relevant file under `docs/prompts/` and apply it before authoring prompts or assets.
 - Research is required for new or materially changed formats.
 - Substantial user-supplied research can satisfy the research requirement for a format change if it is specific enough to drive the template or run artifact.
 - For new or materially changed prompting work, do narrow research first, then wide research.
@@ -67,6 +86,7 @@ When the task matches, read and follow:
   - Codex/Claude should author the template and filled run artifacts.
   - The repo should then render and queue the output.
 - The video CLI/render pipeline should consume an existing local `<slug>.md` artifact. Treat markdown authoring as an agent responsibility, not a runtime Grok step.
+- Executors should consume saved JSON plans under `output/videos/<slug>/plans/`, not ad hoc inline prompt assembly.
 - Post captions in `<slug>_caption.txt` should be authored locally by the agent/local caption writer from saved repo state, not by Grok.
 - On-video dialogue captions should come from the rendered clip audio/transcription pipeline, with prompt dialogue used only as fallback alignment data.
 - If `XAI_API_KEY` is missing, stay template-first and render from saved artifacts rather than raw-topic browser prompting.
@@ -76,6 +96,10 @@ When the task matches, read and follow:
 - Posted-video default: every scheduled video should include the standard appended promo clip from `/Users/admin/Documents/plug.mov`, and the scheduled caption should begin with `Search ii-content-engine on GitHub.`
 - For stitched multi-clip videos, continuity is a primary quality requirement, not a nice-to-have. Agents should optimize for a coherent script, stable character/world design, and visual consistency across clips before optimizing for novelty.
 - If continuity matters across clips, prefer image-conditioned generation and reference-image reuse whenever the model or pipeline supports it. Do not rely on fresh text-only reinterpretation of the same character, environment, object, or world style across clips unless there is no better option.
+- For continuity-sensitive character stories, the required default asset chain is:
+  `hero portrait -> derived character sheet -> scene start frames -> video`
+- For continuity-sensitive character stories, the scene-start-frame stage should normally use the ordered approved character sheets as its reference inputs.
+- For continuity-sensitive character stories, do not jump straight from markdown to video render if the required asset chain has not been generated from saved repo state.
 - The video system supports both `per_clip` image-to-video references and `shared_reference` reuse across clips. Use `per_clip` for isolated beats or loosely connected compilations; use `shared_reference` whenever a stitched sequence depends on continuity of characters, environments, objects, or overall world style.
 - If native dialogue weakens performance or continuity, simplify the spoken lines or move more of the storytelling burden into visuals and captions.
 - Voice-line best practice for multi-character clips: default to one named speaker per clip, explicitly mark `Speaker:`, `Silent characters:`, `Dialogue:`, `Action:`, and `Direction:` in the saved markdown, keep spoken lines short and literal, and do not let silent on-screen characters share or mouth the line.

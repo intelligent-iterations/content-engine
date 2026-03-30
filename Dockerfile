@@ -2,12 +2,15 @@ FROM node:22-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV CONTENT_GEN_PYTHON=/usr/bin/python3
 ENV CONTENT_GEN_DISABLE_BROWSER_SANDBOX=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
+    ffmpeg \
     python3 \
     python3-pip \
+    python3-venv \
     ca-certificates \
     fonts-liberation \
     libasound2 \
@@ -37,10 +40,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY package.json package-lock.json requirements.autopost.txt ./
+COPY package.json package-lock.json requirements.txt ./
 
 RUN npm ci
-RUN python3 -m pip install --break-system-packages --no-cache-dir -r requirements.autopost.txt
+RUN python3 -m pip install --break-system-packages --no-cache-dir -r requirements.txt
 RUN npx playwright install chromium
 
 COPY . .

@@ -4,8 +4,20 @@ import path from 'path';
 import axios from 'axios';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 import { AUTH_DIR, ROOT_DIR, isMainModule } from '../core/paths.js';
-import { generateImage as generateImageWithFallback, downloadImage, IMAGE_MODELS } from '../shared/generate-image.js';
+import {
+  buildVideoExecutionPlan,
+  loadVideoExecutionPlan,
+  saveVideoExecutionPlan,
+} from './execution-plan.js';
+import {
+  generateImage as generateImageWithFallback,
+  downloadImage,
+  IMAGE_MODELS,
+  detectMimeTypeFromBuffer,
+  normalizeImageBufferForOutputPath,
+} from '../shared/generate-image.js';
 
 const XAI_API_KEY = process.env.XAI_API_KEY;
 const BASE_URL = 'https://api.x.ai/v1';
@@ -112,48 +124,6 @@ function buildGrokWebSessionArgs(sessionPath) {
   return ['--cookies', sessionPath];
 }
 
-function buildBrowserClipPrompt(clip, clipDurationSeconds) {
-  const speaker = clip.videoPrompt?.match(/(?:^|\n)Speaker:\s*(.+)$/im)?.[1]?.trim() || null;
-  const silentCharacters = clip.videoPrompt?.match(/(?:^|\n)Silent characters:\s*(.+)$/im)?.[1]?.trim() || null;
-  const dialogue = clip.videoPrompt?.match(/(?:^|\n)Dialogue:\s*"([^"]+)"/im)?.[1]?.trim() || null;
-  const action = clip.videoPrompt?.match(/(?:^|\n)Action:\s*(.+)$/im)?.[1]?.trim() || null;
-  const direction = clip.videoPrompt?.match(/(?:^|\n)Direction:\s*(.+)$/im)?.[1]?.trim() || null;
-
-  return [
-    'Create a vertical 9:16 video clip.',
-    `Target duration: ${clipDurationSeconds} seconds.`,
-    'Treat the following image direction as the opening frame and visual identity to preserve.',
-    'Continuity is more important than novelty or extra detail.',
-    'If recurring characters are present, keep the exact same face/head design, silhouette, wardrobe logic, proportions, palette, environment, and cinematic style established by the image direction and continuity anchors.',
-    'Do not redesign characters into generic humans, new costumes, or a different art style.',
-    'If dialogue makes the acting feel weak, keep the acting simple and let the visual beat stay dominant.',
-    '',
-    'IMAGE DIRECTION:',
-    clip.imagePrompt,
-    '',
-    'CONTINUITY ANCHORS:',
-    clip.continuityAnchors || 'Preserve the same identity, wardrobe, set, and overall style established by the image prompt.',
-    '',
-    'Animate that exact scene using this motion and dialogue direction:',
-    '',
-    'VIDEO DIRECTION:',
-    speaker
-      ? `Only ${speaker} may deliver the spoken line in this clip.`
-      : 'If a spoken line is present, keep it assigned to one clearly readable speaker.',
-    silentCharacters && !/^none$/i.test(silentCharacters)
-      ? `${silentCharacters} stay on-screen silent and must not mouth or appear to say the line.`
-      : 'Any other visible characters stay silent unless the prompt explicitly says otherwise.',
-    dialogue
-      ? `Use exactly this spoken line: "${dialogue}"`
-      : 'Use no spoken dialogue unless the motion direction explicitly requires it.',
-    action || 'Keep one dominant visible action.',
-    direction || clip.videoPrompt,
-    '',
-    'Keep the framing, character, body-part context, and action clear and legible.',
-    'Output a single finished video clip.'
-  ].join('\n');
-}
-
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
@@ -171,16 +141,213 @@ function normalizeReferenceStrategy(value) {
   return strategy === 'shared_reference' ? 'shared_reference' : 'per_clip';
 }
 
+function parseCliArgs(argv = process.argv.slice(2)) {
+  const args = {
+    input: null,
+    md: null,
+    plan: null,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--md' && argv[index + 1]) {
+      args.md = argv[index + 1];
+      index += 1;
+    } else if (arg === '--plan' && argv[index + 1]) {
+      args.plan = argv[index + 1];
+      index += 1;
+    } else if (!arg.startsWith('--') && !args.input) {
+      args.input = arg;
+    }
+  }
+
+  return args;
+}
+
+function mimeTypeForPath(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  return detectMimeTypeFromBuffer(buffer);
+}
+
+function localImagePathToDataUrl(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  const mimeType = detectMimeTypeFromBuffer(buffer);
+  return `data:${mimeType};base64,${buffer.toString('base64')}`;
+}
+
+function parseAspectRatio(aspectRatio = '9:16') {
+  const match = String(aspectRatio || '').trim().match(/^(\d+)\s*:\s*(\d+)$/);
+  if (!match) {
+    return { width: 9, height: 16 };
+  }
+  return {
+    width: Number(match[1]) || 9,
+    height: Number(match[2]) || 16,
+  };
+}
+
+function resolveTargetImageSize(aspectRatio = '9:16', resolution = '720p') {
+  const ratio = parseAspectRatio(aspectRatio);
+  const shortSide = String(resolution || '').includes('1080') ? 1080 : 720;
+
+  if (ratio.width <= ratio.height) {
+    return {
+      width: shortSide,
+      height: Math.round(shortSide * (ratio.height / ratio.width)),
+    };
+  }
+
+  return {
+    width: Math.round(shortSide * (ratio.width / ratio.height)),
+    height: shortSide,
+  };
+}
+
+function aspectDelta(width, height, targetWidth, targetHeight) {
+  const sourceRatio = width / height;
+  const targetRatio = targetWidth / targetHeight;
+  return Math.abs(sourceRatio - targetRatio);
+}
+
+async function prepareReferenceImageForVideo(referenceImagePath, options = {}) {
+  if (!referenceImagePath || !fs.existsSync(referenceImagePath)) {
+    return referenceImagePath;
+  }
+
+  const { width: targetWidth, height: targetHeight } = resolveTargetImageSize(options.aspectRatio, options.resolution);
+  const metadata = await sharp(referenceImagePath).metadata();
+  const sourceWidth = Number(metadata.width) || 0;
+  const sourceHeight = Number(metadata.height) || 0;
+
+  if (!sourceWidth || !sourceHeight) {
+    return referenceImagePath;
+  }
+
+  if (aspectDelta(sourceWidth, sourceHeight, targetWidth, targetHeight) < 0.01) {
+    return referenceImagePath;
+  }
+
+  const preparedDir = path.join(path.dirname(options.outputDir || path.dirname(referenceImagePath)), 'prepared-video-refs');
+  ensureDir(preparedDir);
+  const preparedPath = path.join(
+    preparedDir,
+    `clip${String(options.clipNum || 0).padStart(2, '0')}-${sanitizeFileName(options.clipName || path.basename(referenceImagePath, path.extname(referenceImagePath)))}.png`
+  );
+
+  const background = await sharp(referenceImagePath)
+    .resize(targetWidth, targetHeight, { fit: 'cover' })
+    .blur(20)
+    .modulate({ brightness: 0.78, saturation: 0.9 })
+    .png()
+    .toBuffer();
+
+  const foreground = await sharp(referenceImagePath)
+    .resize(targetWidth, targetHeight, {
+      fit: 'contain',
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png()
+    .toBuffer();
+
+  await sharp(background)
+    .composite([{ input: foreground }])
+    .png()
+    .toFile(preparedPath);
+
+  return preparedPath;
+}
+
+export function loadSiblingAssetManifest(mdPath) {
+  const manifestPath = path.join(path.dirname(mdPath), 'asset-manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    console.warn(`Warning: failed to parse asset manifest at ${manifestPath}: ${error.message}`);
+    return null;
+  }
+}
+
+export function enrichClipsWithManifest(clips, assetManifest, mdPath) {
+  if (!assetManifest) {
+    return clips;
+  }
+
+  const baseDir = path.dirname(mdPath);
+  const sceneFrames = Array.isArray(assetManifest.scene_start_frames)
+    ? assetManifest.scene_start_frames
+    : [];
+
+  return clips.map((clip, index) => {
+    const frame = sceneFrames.find((entry) => {
+      if (entry.clip_index === index + 1) {
+        return true;
+      }
+
+      const clipName = String(clip.name || '').trim().toLowerCase();
+      const frameName = String(entry.clip_name || '').trim().toLowerCase();
+      return clipName && frameName && clipName === frameName;
+    });
+
+    if (!frame?.output_path) {
+      return clip;
+    }
+
+    const resolvedPath = path.resolve(baseDir, frame.output_path);
+    if (!fs.existsSync(resolvedPath)) {
+      return clip;
+    }
+
+    return {
+      ...clip,
+      sceneReferenceImagePath: resolvedPath,
+    };
+  });
+}
+
+export function createExecutionPlanFromMd(mdPath) {
+  const resolvedMdPath = path.resolve(mdPath);
+  const meta = parseCompilationMeta(resolvedMdPath);
+  const rawClips = parseCompilationMD(resolvedMdPath);
+  const assetManifest = loadSiblingAssetManifest(resolvedMdPath);
+  const clips = enrichClipsWithManifest(rawClips, assetManifest, resolvedMdPath);
+
+  return buildVideoExecutionPlan({
+    clips,
+    meta: {
+      ...meta,
+      compilation_md_path: resolvedMdPath,
+    },
+    assetManifest,
+  });
+}
+
+export function materializeExecutionPlanFromMd(mdPath, outputPath = null) {
+  const resolvedMdPath = path.resolve(mdPath);
+  const plan = createExecutionPlanFromMd(resolvedMdPath);
+  const planPath = saveVideoExecutionPlan(plan, resolvedMdPath, outputPath || undefined);
+  return {
+    plan: loadVideoExecutionPlan(planPath),
+    planPath,
+  };
+}
+
 async function persistReferenceImageAsset(imageResult, outputPath) {
   if (typeof imageResult === 'string' && !/^https?:\/\//i.test(imageResult)) {
     if (path.resolve(imageResult) !== path.resolve(outputPath)) {
-      fs.copyFileSync(imageResult, outputPath);
+      const buffer = fs.readFileSync(imageResult);
+      const normalizedBuffer = await normalizeImageBufferForOutputPath(buffer, outputPath);
+      fs.writeFileSync(outputPath, normalizedBuffer);
     }
     return outputPath;
   }
 
   const buffer = await downloadImage(imageResult);
-  fs.writeFileSync(outputPath, buffer);
+  const normalizedBuffer = await normalizeImageBufferForOutputPath(buffer, outputPath);
+  fs.writeFileSync(outputPath, normalizedBuffer);
   return outputPath;
 }
 
@@ -229,7 +396,7 @@ function generateClipViaBrowser(clip, videoPath, options = {}) {
 
   const requestedDurationSeconds = options.clipDurationSeconds || 6;
   const clipDurationSeconds = coerceBrowserClipDuration(requestedDurationSeconds);
-  const prompt = buildBrowserClipPrompt(clip, clipDurationSeconds);
+  const prompt = clip.primaryVideoPrompt;
   const scriptPath = path.join(ROOT_DIR, 'code', 'video', 'grok-video-automation.js');
   const outDir = path.dirname(videoPath);
   const beforeFiles = new Set(fs.readdirSync(outDir));
@@ -483,7 +650,7 @@ export async function generateClip(clip, index, outputDir, options = {}) {
 
   if (!XAI_API_KEY) {
     const referenceStrategy = normalizeReferenceStrategy(options.referenceStrategy);
-    let referenceImagePath = options.sharedReferenceImagePath || null;
+    let referenceImagePath = clip.sceneReferenceImagePath || options.sharedReferenceImagePath || null;
 
     if (referenceStrategy === 'per_clip' || !referenceImagePath) {
       const referenceDir = path.join(path.dirname(outputDir), 'reference-images');
@@ -492,6 +659,14 @@ export async function generateClip(clip, index, outputDir, options = {}) {
       const generated = await generateReferenceAsset(clip.imagePrompt, targetPath, options);
       referenceImagePath = generated.localPath;
     }
+
+    referenceImagePath = await prepareReferenceImageForVideo(referenceImagePath, {
+      aspectRatio: options.aspectRatio,
+      resolution: options.resolution,
+      outputDir,
+      clipNum,
+      clipName: clip.name,
+    });
 
     try {
       return generateClipViaBrowser(clip, videoPath, {
@@ -506,7 +681,7 @@ export async function generateClip(clip, index, outputDir, options = {}) {
       console.log(`  [browser] Primary prompt failed for ${clip.name}, retrying with fallback prompt...`);
       return generateClipViaBrowser({
         ...clip,
-        videoPrompt: clip.fallbackVideoPrompt,
+        primaryVideoPrompt: clip.fallbackVideoPrompt,
       }, videoPath, {
         ...options,
         referenceImagePath,
@@ -515,9 +690,20 @@ export async function generateClip(clip, index, outputDir, options = {}) {
   }
 
   const referenceStrategy = normalizeReferenceStrategy(options.referenceStrategy);
-  let imageUrl = options.sharedReferenceImageUrl || null;
+  const sceneReferenceImagePath = clip.sceneReferenceImagePath
+    ? await prepareReferenceImageForVideo(clip.sceneReferenceImagePath, {
+      aspectRatio: options.aspectRatio,
+      resolution: options.resolution,
+      outputDir,
+      clipNum,
+      clipName: clip.name,
+    })
+    : null;
+  let imageUrl = clip.sceneReferenceImagePath
+    ? localImagePathToDataUrl(sceneReferenceImagePath)
+    : (options.sharedReferenceImageUrl || null);
 
-  if (referenceStrategy === 'per_clip' || !imageUrl) {
+  if ((referenceStrategy === 'per_clip' || !imageUrl) && !clip.sceneReferenceImagePath) {
     imageUrl = await generateImage(clip.imagePrompt, clip.name, options);
   }
 
@@ -525,14 +711,22 @@ export async function generateClip(clip, index, outputDir, options = {}) {
   console.log(`  [video] Starting video generation for ${clip.name}...`);
   let requestId;
   try {
-    requestId = await generateVideo(imageUrl, clip.videoPrompt, options);
+    requestId = await generateVideo(
+      imageUrl,
+      clip.primaryVideoPrompt,
+      options
+    );
   } catch (error) {
     if (!clip.fallbackVideoPrompt || !shouldRetryWithFallback(error)) {
       throw error;
     }
 
     console.log(`  [video] Primary prompt rejected for ${clip.name}, retrying with fallback prompt...`);
-    requestId = await generateVideo(imageUrl, clip.fallbackVideoPrompt, options);
+    requestId = await generateVideo(
+      imageUrl,
+      clip.fallbackVideoPrompt,
+      options
+    );
   }
   console.log(`  [video] Request ID: ${requestId}`);
 
@@ -546,7 +740,11 @@ export async function generateClip(clip, index, outputDir, options = {}) {
     }
 
     console.log(`  [video] Generated video failed moderation for ${clip.name}, retrying with fallback prompt...`);
-    const fallbackRequestId = await generateVideo(imageUrl, clip.fallbackVideoPrompt, options);
+    const fallbackRequestId = await generateVideo(
+      imageUrl,
+      clip.fallbackVideoPrompt,
+      options
+    );
     console.log(`  [video] Fallback request ID: ${fallbackRequestId}`);
     videoUrl = await pollForVideo(fallbackRequestId, clip.name);
   }
@@ -594,70 +792,55 @@ export function stitchClips(clipPaths, outputPath) {
   console.log(`\nFinal video: ${outputPath}`);
 }
 
-// Main
-export async function main() {
-  const mdFile = process.argv[2];
+export async function executeExecutionPlan(executionPlan) {
+  const referenceStrategy = normalizeReferenceStrategy(executionPlan.referenceStrategy);
+  const runDir = executionPlan.runDir || (executionPlan.compilationMdPath ? path.dirname(executionPlan.compilationMdPath) : process.cwd());
+  const baseName = executionPlan.baseName || (executionPlan.compilationMdPath ? path.basename(executionPlan.compilationMdPath, '.md') : 'video');
+  console.log(`Parsed ${executionPlan.jobs.length} clips from ${executionPlan.compilationMdPath ? path.basename(executionPlan.compilationMdPath) : baseName}\n`);
 
-  if (!mdFile) {
-    console.error('Usage: node code/cli/video-compilation.js <path-to-compilation.md>');
-    console.error('Example: node code/cli/video-compilation.js output/videos/skincare-benefits-hero-compilation.md');
-    process.exit(1);
-  }
-
-  const mdPath = path.resolve(mdFile);
-  if (!fs.existsSync(mdPath)) {
-    console.error(`File not found: ${mdPath}`);
-    process.exit(1);
-  }
-
-  // Parse the MD
-  const meta = parseCompilationMeta(mdPath);
-  const clips = parseCompilationMD(mdPath);
-  const referenceStrategy = normalizeReferenceStrategy(meta.reference_strategy);
-  console.log(`Parsed ${clips.length} clips from ${path.basename(mdPath)}\n`);
-
-  for (const clip of clips) {
+  for (const clip of executionPlan.jobs) {
     console.log(`  - ${clip.name} (${clip.mood})`);
   }
 
-  // Create output directory
-  const baseName = path.basename(mdPath, '.md');
-  const outputDir = path.join(path.dirname(mdPath), 'clips');
+  const outputDir = executionPlan.clipsOutputDir || path.join(runDir, 'clips');
   fs.mkdirSync(outputDir, { recursive: true });
 
   let sharedReferenceImagePath = null;
   let sharedReferenceImageUrl = null;
-  if (referenceStrategy === 'shared_reference' && clips[0]?.imagePrompt) {
-    const referenceDir = path.join(path.dirname(mdPath), 'reference');
+  const everyClipHasSceneFrame = executionPlan.jobs.length > 0 && executionPlan.jobs.every((clip) => clip.sceneReferenceImagePath);
+  if (referenceStrategy === 'shared_reference' && executionPlan.jobs[0]?.imagePrompt && !everyClipHasSceneFrame) {
+    const referenceDir = path.join(runDir, 'reference');
     ensureDir(referenceDir);
     const sharedReferencePath = path.join(referenceDir, 'shared-reference.png');
     console.log(`\n--- Generating shared reference image (${referenceStrategy}) ---`);
-    const sharedReference = await generateReferenceAsset(clips[0].imagePrompt, sharedReferencePath, {
-      aspectRatio: meta.aspect_ratio,
-      resolution: meta.resolution,
+    const sharedReference = await generateReferenceAsset(executionPlan.jobs[0].imagePrompt, sharedReferencePath, {
+      aspectRatio: executionPlan.aspectRatio,
+      resolution: executionPlan.resolution,
     });
     sharedReferenceImagePath = sharedReference.localPath;
     sharedReferenceImageUrl = sharedReference.imageUrl;
     console.log(`Shared reference image: ${sharedReferenceImagePath}`);
+  } else if (everyClipHasSceneFrame) {
+    console.log('\n--- Using saved scene start frames from asset-manifest.json for per-clip continuity ---');
   }
 
   // Generate each clip
   const clipPaths = [];
-  for (let i = 0; i < clips.length; i++) {
+  for (let i = 0; i < executionPlan.jobs.length; i++) {
     try {
-      const clipPath = await generateClip(clips[i], i, outputDir, {
+      const clipPath = await generateClip(executionPlan.jobs[i], i, outputDir, {
         referenceStrategy,
         sharedReferenceImagePath,
         sharedReferenceImageUrl,
-        clipDurationSeconds: meta.clip_duration_seconds,
-        aspectRatio: meta.aspect_ratio,
-        resolution: meta.resolution,
-        imageModel: meta.image_model,
-        videoModel: meta.video_model,
+        clipDurationSeconds: executionPlan.clipDurationSeconds,
+        aspectRatio: executionPlan.aspectRatio,
+        resolution: executionPlan.resolution,
+        imageModel: executionPlan.imageModel,
+        videoModel: executionPlan.videoModel,
       });
       clipPaths.push(clipPath);
     } catch (err) {
-      console.error(`\nFailed on clip ${i + 1} (${clips[i].name}): ${err.message}`);
+      console.error(`\nFailed on clip ${i + 1} (${executionPlan.jobs[i].name}): ${err.message}`);
       console.error('Continuing with remaining clips...\n');
     }
   }
@@ -667,12 +850,50 @@ export async function main() {
     process.exit(1);
   }
 
-  // Stitch together
-  const finalPath = path.join(path.dirname(mdPath), `${baseName}.mp4`);
-  stitchClips(clipPaths, finalPath);
+  const finalPath = executionPlan.finalVideoPath || path.join(runDir, `${baseName}.mp4`);
+  const stitchedPath = executionPlan.stitchedVideoPath || finalPath;
+  stitchClips(clipPaths, stitchedPath);
 
-  console.log(`\nDone! ${clipPaths.length}/${clips.length} clips generated and stitched.`);
-  console.log(`Output: ${finalPath}`);
+  console.log(`\nDone! ${clipPaths.length}/${executionPlan.jobs.length} clips generated and stitched.`);
+  console.log(`Output: ${stitchedPath}`);
+  return {
+    clipPaths,
+    stitchedPath,
+    finalPath,
+  };
+}
+
+// Main
+export async function main(argv = process.argv.slice(2)) {
+  const args = parseCliArgs(argv);
+  const input = args.plan || args.md || args.input;
+
+  if (!input) {
+    console.error('Usage: node code/cli/video-compilation.js <path-to-compilation.md | path-to-execution-plan.json>');
+    console.error('Example: node code/cli/video-compilation.js output/videos/story/story.md');
+    process.exit(1);
+  }
+
+  const resolvedInput = path.resolve(input);
+  if (!fs.existsSync(resolvedInput)) {
+    console.error(`File not found: ${resolvedInput}`);
+    process.exit(1);
+  }
+
+  let executionPlan;
+  if (args.plan || path.extname(resolvedInput).toLowerCase() === '.json') {
+    executionPlan = loadVideoExecutionPlan(resolvedInput);
+  } else {
+    const materialized = materializeExecutionPlanFromMd(resolvedInput);
+    executionPlan = materialized.plan;
+    console.log(`Saved execution plan: ${materialized.planPath}\n`);
+  }
+
+  const result = await executeExecutionPlan(executionPlan);
+  if (result.stitchedPath !== result.finalPath) {
+    fs.renameSync(result.stitchedPath, result.finalPath);
+    console.log(`Final video: ${result.finalPath}`);
+  }
 }
 
 if (isMainModule(import.meta.url)) {

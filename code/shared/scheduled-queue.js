@@ -3,6 +3,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import {
   CAROUSELS_DIR,
+  POSTED_VIDEOS_DIR,
   ROOT_DIR,
   SCHEDULED_CAROUSELS_DIR,
   SCHEDULED_VIDEOS_DIR,
@@ -40,6 +41,25 @@ function readJson(filePath) {
 
 function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+function rewriteRelativePathPrefix(value, fromPrefix, toPrefix) {
+  const normalized = String(value || '');
+  if (!normalized || !normalized.startsWith(fromPrefix)) {
+    return value;
+  }
+  return `${toPrefix}${normalized.slice(fromPrefix.length)}`;
+}
+
+function manifestPlatformsForType(type, manifest) {
+  const fallback = defaultPlatforms(type);
+  const posts = manifest?.posts || fallback;
+  return Object.keys(posts);
+}
+
+function isManifestFullyPosted(type, manifest) {
+  return manifestPlatformsForType(type, manifest)
+    .every((platform) => Boolean(manifest?.posts?.[platform]?.permalink));
 }
 
 function relativeToRepo(filePath) {
@@ -112,7 +132,58 @@ export function updateScheduledPlatformPost(type, itemDir, platform, details) {
   };
 
   writeJson(item.manifestPath, item.manifest);
+
+  if (type === 'video' && isManifestFullyPosted(type, item.manifest)) {
+    return archiveScheduledVideoItem(item.dir);
+  }
+
   return item.manifest;
+}
+
+export function archiveScheduledVideoItem(itemDir) {
+  const item = loadManifestFromDir(itemDir);
+  if (!item) {
+    throw new Error(`Missing scheduled manifest in ${itemDir}`);
+  }
+
+  ensureDir(POSTED_VIDEOS_DIR);
+
+  const slug = path.basename(item.dir);
+  const targetDir = path.join(POSTED_VIDEOS_DIR, slug);
+  const oldRelativeDir = relativeToRepo(item.dir);
+  const newRelativeDir = relativeToRepo(targetDir);
+
+  fs.rmSync(targetDir, { recursive: true, force: true });
+  fs.renameSync(item.dir, targetDir);
+
+  const movedItem = loadManifestFromDir(targetDir);
+  if (!movedItem) {
+    throw new Error(`Archived scheduled video is missing its manifest: ${targetDir}`);
+  }
+
+  const manifest = movedItem.manifest;
+  manifest.archived_from_queue_at = new Date().toISOString();
+  manifest.queue_status = 'posted';
+  manifest.archived_from = oldRelativeDir;
+
+  if (manifest.assets) {
+    for (const [key, value] of Object.entries(manifest.assets)) {
+      if (typeof value === 'string') {
+        manifest.assets[key] = rewriteRelativePathPrefix(value, oldRelativeDir, newRelativeDir);
+      }
+    }
+  }
+
+  if (manifest.posts && typeof manifest.posts === 'object') {
+    for (const post of Object.values(manifest.posts)) {
+      if (post && typeof post === 'object' && typeof post.source_file === 'string') {
+        post.source_file = rewriteRelativePathPrefix(post.source_file, oldRelativeDir, newRelativeDir);
+      }
+    }
+  }
+
+  writeJson(movedItem.manifestPath, manifest);
+  return manifest;
 }
 
 function detectVideoAssets(sourceDir) {

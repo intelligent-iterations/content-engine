@@ -13,6 +13,7 @@ export const VIDEOS_DIR = path.join(OUTPUT_DIR, 'videos');
 export const CAROUSELS_DIR = path.join(OUTPUT_DIR, 'carousels');
 export const SCHEDULED_VIDEOS_DIR = path.join(OUTPUT_DIR, 'scheduled_videos');
 export const SCHEDULED_CAROUSELS_DIR = path.join(OUTPUT_DIR, 'scheduled_carousels');
+export const POSTED_VIDEOS_DIR = path.join(OUTPUT_DIR, 'posted_videos');
 export const TEMP_DIR = path.join(OUTPUT_DIR, 'tmp');
 
 export const VIDEO_TEMPLATE_REGISTRY_PATH = path.join(PROMPTS_DIR, 'video-templates.json');

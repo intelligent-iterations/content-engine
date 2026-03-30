@@ -17,12 +17,19 @@ function parseSlot(argv) {
 
 async function main() {
   const slot = parseSlot(process.argv.slice(2));
+  const dryRun = process.argv.includes('--dry-run');
   console.log(`X slot: ${slot}`);
 
   if (slot === 'midday') {
+    if (dryRun) {
+      process.argv.push('--dry-run');
+    }
     return autoPostToX();
   }
 
+  if (dryRun) {
+    process.argv.push('--dry-run');
+  }
   return autoPostXAIVideo();
 }
 

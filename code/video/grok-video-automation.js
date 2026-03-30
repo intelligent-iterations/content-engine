@@ -202,6 +202,31 @@ function resolveCookiePath(providedPath) {
   return DEFAULT_COOKIE_PATH_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
+function resolvePlaywrightLaunchOptions(args) {
+  const launchOptions = {
+    headless: !args.headed,
+    acceptDownloads: true,
+    downloadsPath: args.outDir,
+    viewport: { width: 1440, height: 1080 },
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  };
+
+  const executableCandidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser'
+  ].filter(Boolean);
+
+  const executablePath = executableCandidates.find((candidate) => fs.existsSync(candidate));
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  } else {
+    launchOptions.channel = 'chrome';
+  }
+
+  return launchOptions;
+}
+
 async function buildContext(browser, args) {
   const contextOptions = {
     acceptDownloads: true,
@@ -228,14 +253,7 @@ async function applyCookiesToContext(context, args) {
 async function launchPersistentChrome(args) {
   ensureDir(args.userDataDir);
   ensureDir(args.outDir);
-  const launchOptions = {
-    headless: !args.headed,
-    channel: 'chrome',
-    acceptDownloads: true,
-    downloadsPath: args.outDir,
-    viewport: { width: 1440, height: 1080 },
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-  };
+  const launchOptions = resolvePlaywrightLaunchOptions(args);
 
   try {
     return await chromium.launchPersistentContext(args.userDataDir, launchOptions);

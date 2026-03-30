@@ -118,3 +118,7 @@ run_*.sh
 # Research
 research/*
 !research/.gitkeep
+
+# Local hero task canvas state
+.hero/canvases/hero-tasks.json
+.hero/canvases/hero-tasks.md

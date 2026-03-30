@@ -54,6 +54,15 @@ const ACTION_BUTTON_SELECTOR_CANDIDATES = [
   'button[type="submit"]'
 ];
 
+const REFERENCE_IMAGE_BUTTON_LABELS = [
+  /upload/i,
+  /add image/i,
+  /reference/i,
+  /attach/i,
+  /image/i,
+  /^\+$/i
+];
+
 function printUsage() {
   console.log(`
 Usage:
@@ -66,6 +75,7 @@ Options:
   --state <path>             Playwright storage state path
   --cookies <path>           Import cookies JSON before running
   --out-dir <path>           Directory for downloaded images
+  --reference-image <path>   Local image file to attach before generating, repeatable
   --user-data-dir <path>     Persistent Chrome profile directory
   --timeout-ms <number>      Max wait time for image generation
   --headed                   Run with visible browser
@@ -87,6 +97,7 @@ function parseArgs(argv) {
     timeoutMs: DEFAULT_TIMEOUT_MS,
     rateLimitWaitMs: DEFAULT_RATE_LIMIT_WAIT_MS,
     maxRateLimitRetries: DEFAULT_MAX_RATE_LIMIT_RETRIES,
+    referenceImagePaths: [],
     headed: false,
     debug: false,
     saveLogin: false,
@@ -125,6 +136,11 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg.startsWith('--out-dir=')) {
       args.outDir = arg.slice('--out-dir='.length);
+    } else if (arg === '--reference-image') {
+      args.referenceImagePaths.push(argv[i + 1]);
+      i += 1;
+    } else if (arg.startsWith('--reference-image=')) {
+      args.referenceImagePaths.push(arg.slice('--reference-image='.length));
     } else if (arg === '--user-data-dir') {
       args.userDataDir = argv[i + 1];
       i += 1;
@@ -202,6 +218,31 @@ function resolveCookiePath(providedPath) {
   return DEFAULT_COOKIE_PATH_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
+function resolvePlaywrightLaunchOptions(args) {
+  const launchOptions = {
+    headless: !args.headed,
+    acceptDownloads: true,
+    downloadsPath: args.outDir,
+    viewport: { width: 1440, height: 1080 },
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  };
+
+  const executableCandidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser'
+  ].filter(Boolean);
+
+  const executablePath = executableCandidates.find((candidate) => fs.existsSync(candidate));
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  } else {
+    launchOptions.channel = 'chrome';
+  }
+
+  return launchOptions;
+}
+
 async function applyCookiesToContext(context, args) {
   await applyStorageStateToContext(context, args.statePath);
   await applyCookiesFileToContext(context, resolveCookiePath(args.cookiesPath));
@@ -214,14 +255,7 @@ async function launchPersistentChrome(args) {
     : args.userDataDir;
 
   ensureDir(userDataDir);
-  const launchOptions = {
-    headless: !args.headed,
-    channel: 'chrome',
-    acceptDownloads: true,
-    downloadsPath: args.outDir,
-    viewport: { width: 1440, height: 1080 },
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-  };
+  const launchOptions = resolvePlaywrightLaunchOptions(args);
 
   try {
     return await chromium.launchPersistentContext(userDataDir, launchOptions);
@@ -412,6 +446,67 @@ async function fillPrompt(locator, prompt, debug) {
   }
 
   throw new Error('Unsupported prompt input type');
+}
+
+async function attachReferenceImages(page, imagePaths, debug) {
+  if (!Array.isArray(imagePaths) || imagePaths.length === 0) {
+    return;
+  }
+
+  const resolvedPaths = imagePaths.map((imagePath) => path.resolve(imagePath));
+  const fileInputs = page.locator('input[type="file"]');
+  const fileInputCount = await fileInputs.count().catch(() => 0);
+  let attachedPaths = [];
+
+  for (let i = 0; i < fileInputCount; i += 1) {
+    const input = fileInputs.nth(i);
+    try {
+      const supportsMultiple = await input.evaluate((node) => node.hasAttribute('multiple')).catch(() => false);
+      attachedPaths = supportsMultiple ? [...resolvedPaths] : [resolvedPaths[0]];
+      await input.setInputFiles(attachedPaths);
+      await page.waitForTimeout(1500);
+      logDebug(debug, `Attached ${attachedPaths.length} reference image(s) via file input`);
+
+      if (supportsMultiple || resolvedPaths.length === 1) {
+        return;
+      }
+
+      break;
+    } catch {
+      // Try next input or button-driven chooser.
+    }
+  }
+
+  for (const resolvedPath of resolvedPaths.slice(attachedPaths.length)) {
+    let attached = false;
+
+    for (const label of REFERENCE_IMAGE_BUTTON_LABELS) {
+      const button = page.getByRole('button', { name: label }).first();
+
+      try {
+        await button.waitFor({ state: 'visible', timeout: 1000 });
+        const chooserPromise = page.waitForEvent('filechooser', { timeout: 2000 });
+        await button.click({ force: true });
+        const chooser = await chooserPromise;
+        await chooser.setFiles(resolvedPath);
+        await page.waitForTimeout(1500);
+        logDebug(debug, `Attached reference image via file chooser: ${resolvedPath}`);
+        attached = true;
+        attachedPaths.push(resolvedPath);
+        break;
+      } catch {
+        // Try next label.
+      }
+    }
+
+    if (!attached) {
+      throw new Error(`Could not attach reference image: ${resolvedPath}`);
+    }
+  }
+
+  if (attachedPaths.length < resolvedPaths.length) {
+    throw new Error('Could not find a file input or upload control for image reference input');
+  }
 }
 
 async function findActionButton(page) {
@@ -608,7 +703,8 @@ async function collectKnownPublicAssetUrls(page) {
   });
 }
 
-async function resolvePromptSection(page, prompt, debug) {
+async function resolvePromptSection(page, prompt, debug, options = {}) {
+  const allowFallback = options.allowFallback !== false;
   const target = normalizePromptText(prompt);
   const locator = page.locator('[id^="imagine-masonry-section-"]').filter({
     has: page.locator('span')
@@ -624,12 +720,51 @@ async function resolvePromptSection(page, prompt, debug) {
     }
   }
 
+  if (!allowFallback) {
+    logDebug(debug, `No prompt section match for "${prompt}" yet`);
+    return null;
+  }
+
   logDebug(debug, `No exact prompt section match for "${prompt}", using latest section`);
   return locator.first();
 }
 
+async function extractSectionImageMetadata(section) {
+  return section.evaluate((node) => {
+    const normalizeUrl = (value) => {
+      if (!value) return '';
+      if (value.startsWith('//')) return `${location.protocol}${value}`;
+      if (value.startsWith('/')) return `${location.origin}${value}`;
+      return value;
+    };
 
-async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interceptedJobIds = []) {
+    const imageUrls = Array.from(node.querySelectorAll('img'))
+      .map((img) => ({
+        src: normalizeUrl(img.currentSrc || img.src || ''),
+        width: img.naturalWidth || img.width || 0,
+        height: img.naturalHeight || img.height || 0
+      }))
+      .filter((img) => img.src)
+      .sort((a, b) => (b.width * b.height) - (a.width * a.height));
+
+    const downloadLinks = Array.from(node.querySelectorAll('a[href], a[download]'))
+      .map((link) => ({
+        href: normalizeUrl(link.getAttribute('href') || ''),
+        text: (link.textContent || link.getAttribute('aria-label') || '').trim()
+      }))
+      .filter((link) => link.href);
+
+    return {
+      currentUrl: location.href,
+      metaUrls: [],
+      imageUrls,
+      downloadLinks
+    };
+  });
+}
+
+
+async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interceptedJobIds = [], prompt = '') {
   const deadline = Date.now() + timeoutMs;
   let sawProgress = false;
   const knownUrls = collectKnownMediaUrls(initialMetadata);
@@ -666,18 +801,27 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
       };
     }
 
-    // PATH 2: Check for new direct image URLs
-    const metadata = await extractImageMetadata(page);
-    const directUrl = chooseDirectImageUrl({
-      ...metadata,
-      metaUrls: metadata.metaUrls.filter((url) => !knownUrls.has(url)),
-      imageUrls: metadata.imageUrls.filter((img) => !knownUrls.has(img.src)),
-      downloadLinks: metadata.downloadLinks.filter((link) => !knownUrls.has(link.href))
-    });
+    const promptSection = prompt
+      ? await resolvePromptSection(page, prompt, debug, { allowFallback: false }).catch(() => null)
+      : null;
+    const promptSectionMetadata = promptSection
+      ? await extractSectionImageMetadata(promptSection).catch(() => null)
+      : null;
+    const pageMetadata = await extractImageMetadata(page);
+
+    // PATH 2: Check for new direct image URLs in the prompt-matched section only.
+    const directUrl = promptSectionMetadata
+      ? chooseDirectImageUrl({
+        ...promptSectionMetadata,
+        metaUrls: promptSectionMetadata.metaUrls.filter((url) => !knownUrls.has(url)),
+        imageUrls: promptSectionMetadata.imageUrls.filter((img) => !knownUrls.has(img.src)),
+        downloadLinks: promptSectionMetadata.downloadLinks.filter((link) => !knownUrls.has(link.href))
+      })
+      : null;
 
     if (directUrl) {
       if (/^data:image\//i.test(directUrl)) {
-        const matchingImg = metadata.imageUrls.find((img) => img.src === directUrl);
+        const matchingImg = promptSectionMetadata?.imageUrls.find((img) => img.src === directUrl);
         const imgMaxDim = matchingImg ? Math.max(matchingImg.width, matchingImg.height) : 0;
 
         if (imgMaxDim >= MIN_IMAGE_DIMENSION && !previewDetected) {
@@ -689,13 +833,26 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
           // in headless mode).
           if (interceptedJobIds.length > 0) {
             logDebug(debug, `Have ${interceptedJobIds.length} job IDs — navigating to post page for full-res image`);
-            return { directUrl, metadata };
+            return { directUrl, metadata: pageMetadata };
           }
         }
       } else {
         logDebug(debug, `Direct HTTP image URL detected: ${directUrl}`);
-        return { directUrl, metadata };
+        return { directUrl, metadata: pageMetadata };
       }
+    }
+
+    // PATH 2B: Accept new page-level HTTP assets, but never page-level data URLs.
+    const pageDirectUrl = chooseDirectImageUrl({
+      ...pageMetadata,
+      metaUrls: pageMetadata.metaUrls.filter((url) => !knownUrls.has(url)),
+      imageUrls: pageMetadata.imageUrls.filter((img) => !knownUrls.has(img.src)),
+      downloadLinks: pageMetadata.downloadLinks.filter((link) => !knownUrls.has(link.href))
+    });
+
+    if (pageDirectUrl && !/^data:image\//i.test(pageDirectUrl)) {
+      logDebug(debug, `Page-level HTTP image URL detected: ${pageDirectUrl}`);
+      return { directUrl: pageDirectUrl, metadata: pageMetadata };
     }
 
     // PATH 3: Check image selector candidates for HTTP URLs
@@ -722,7 +879,9 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
     if (previewDetected && interceptedJobIds.length > 0) {
       logDebug(debug, 'Preview + job IDs ready — returning for post-page navigation');
       const lastMetadata = await extractImageMetadata(page).catch(() => initialMetadata);
-      const lastDirectUrl = chooseDirectImageUrl(lastMetadata);
+      const lastDirectUrl = promptSectionMetadata
+        ? chooseDirectImageUrl(promptSectionMetadata)
+        : null;
       if (lastDirectUrl) {
         return { directUrl: lastDirectUrl, metadata: lastMetadata };
       }
@@ -928,6 +1087,7 @@ async function runPrompt(args) {
       await dismissInterruptions(page, args.debug);
       await assertLoggedIn(page);
       await ensureImageMode(page, args.debug);
+      await attachReferenceImages(page, args.referenceImagePaths, args.debug);
 
       const promptInput = await findVisiblePromptLocator(page);
       await fillPrompt(promptInput, args.prompt, args.debug);
@@ -1007,7 +1167,7 @@ async function runPrompt(args) {
       await submitPrompt(page, promptInput, args.debug);
 
       try {
-        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata, interceptedJobIds);
+        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata, interceptedJobIds, args.prompt);
 
         // Try to upgrade from data URL preview to full-res CDN image.
         // The WS-intercepted /images/{jobId} CDN URLs are the exact generated
@@ -1150,6 +1310,12 @@ async function main() {
     if (args.saveLogin) {
       await saveLoginState(args);
       return;
+    }
+
+    for (const referenceImagePath of args.referenceImagePaths) {
+      if (!fs.existsSync(referenceImagePath)) {
+        throw new Error(`Reference image not found: ${referenceImagePath}`);
+      }
     }
 
     await runPrompt(args);

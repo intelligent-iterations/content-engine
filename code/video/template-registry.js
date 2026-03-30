@@ -35,6 +35,8 @@ function getTemplateContract(template) {
     contract_version: template.contract_version || 1,
     authoring_sections: template.authoring_sections || [],
     workflow_contract: template.workflow_contract || null,
+    tool_plan_contract: template.tool_plan_contract || null,
+    video_execution_contract: template.video_execution_contract || null,
     asset_contract: template.asset_contract || null,
     cast_contract: template.cast_contract || null,
     scene_contract: template.scene_contract || null,
@@ -74,7 +76,10 @@ export function listTemplates() {
 
 export function resolveTemplate(templateId, legacyFormat = null) {
   const registry = loadTemplateRegistry();
-  const requestedId = templateId || legacyFormat || 'story-driven-character-drama';
+  const requestedId = templateId
+    || legacyFormat
+    || registry.defaults?.default_template_id
+    || registry.templates[0]?.id;
   const template = registry.templates.find(item => item.id === requestedId);
 
   if (!template) {

@@ -19,6 +19,8 @@
     "test:overlay": "node code/test-overlay.js",
     "video": "node code/cli/video-compilation.js",
     "video:auto": "node code/cli/video.js",
+    "video:execution-plan": "node code/cli/video-execution-plan.js",
+    "video:tool-plan": "node code/cli/video-tool-plan.js",
     "grok:export-session": ".venv/bin/python code/cli/export-grok-cookies.py",
     "grok:login": "node code/cli/grok-video.js --save-login --headed",
     "grok:image": "node code/image/grok-image-automation.js",

@@ -75,6 +75,21 @@ npm run docker:x:midday
 npm run docker:tiktok:evening
 ```
 
+## Dry-Run Audit
+
+Use the same shell entrypoint that the plists call, but append `--dry-run` so each slot can be validated without posting:
+
+```bash
+scripts/docker-slot.sh instagram morning --dry-run
+scripts/docker-slot.sh instagram midday --dry-run
+scripts/docker-slot.sh instagram evening --dry-run
+scripts/docker-slot.sh tiktok morning --dry-run
+scripts/docker-slot.sh tiktok evening --dry-run
+scripts/docker-slot.sh x morning --dry-run
+scripts/docker-slot.sh x midday --dry-run
+scripts/docker-slot.sh x evening --dry-run
+```
+
 ## Remove
 
 ```bash

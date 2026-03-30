@@ -124,7 +124,7 @@ node code/cli/carousel.js --template comparison-list --output-name example-topic
 Render a video from a saved markdown artifact:
 
 ```bash
-node code/cli/video.js "a tiny office feud between mascot characters" --template story-driven-character-drama --output-name mascot-feud --md output/videos/mascot-feud/mascot-feud.md
+node code/cli/video.js "absurd fruit revenge story in a dessert banquet hall" --template anthropomorphic-fruit-revenge-drama --output-name fruit-revenge --md output/videos/fruit-revenge/fruit-revenge.md
 ```
 
 Export Grok cookies from Chrome:

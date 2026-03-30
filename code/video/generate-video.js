@@ -1,7 +1,11 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-import { parseCompilationMD, generateClip, stitchClips, lastHit429 } from './generate-video-compilation.js';
+import {
+  parseCompilationMD,
+  materializeExecutionPlanFromMd,
+  executeExecutionPlan,
+} from './generate-video-compilation.js';
 import { burnCaptions } from './add-captions.js';
 import {
   buildCompilationScaffold,
@@ -344,47 +348,22 @@ async function runClipPipeline({ mdPath, baseName, videosDir, settings, dryRun }
   }
 
   console.log('[4/5] Running video generation pipeline...\n');
+  const { plan, planPath } = materializeExecutionPlanFromMd(mdPath);
+  console.log(`  Saved execution plan: ${planPath}\n`);
 
-  const clips = parseCompilationMD(mdPath);
-  console.log(`Parsed ${clips.length} clips:\n`);
-  for (const clip of clips) {
-    console.log(`  - ${clip.name} (${clip.mood})`);
-  }
-
-  const outputDir = path.join(videosDir, 'clips');
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const clipPaths = [];
-  for (let i = 0; i < clips.length; i++) {
-    try {
-      const clipPath = await generateClip(clips[i], i, outputDir, {
-        clipDurationSeconds: settings.clipDurationSeconds,
-        aspectRatio: settings.aspectRatio,
-        resolution: settings.resolution,
-        videoModel: settings.videoModel,
-        imageModel: settings.imageModel,
-      });
-      clipPaths.push(clipPath);
-
-      if (i < clips.length - 1) {
-        const cooldown = lastHit429 ? 15000 : 5000;
-        console.log(`\n  [cooldown] Waiting ${cooldown / 1000}s before next clip...${lastHit429 ? ' (extended: hit rate limit)' : ''}`);
-        await new Promise((resolve) => setTimeout(resolve, cooldown));
-      }
-    } catch (err) {
-      console.error(`\nFailed on clip ${i + 1} (${clips[i].name}): ${err.message}`);
-      console.error('Continuing with remaining clips...\n');
-    }
-  }
-
-  if (clipPaths.length === 0) {
-    console.error('All clips failed to generate.');
-    process.exit(1);
-  }
-
-  const stitchedPath = path.join(videosDir, `${baseName}_stitched.mp4`);
+  let result;
   try {
-    stitchClips(clipPaths, stitchedPath);
+    result = await executeExecutionPlan({
+      ...plan,
+      clipDurationSeconds: settings.clipDurationSeconds || plan.clipDurationSeconds,
+      aspectRatio: settings.aspectRatio || plan.aspectRatio,
+      resolution: settings.resolution || plan.resolution,
+      imageModel: settings.imageModel || plan.imageModel,
+      videoModel: settings.videoModel || plan.videoModel,
+      clipsOutputDir: path.join(videosDir, 'clips'),
+      stitchedVideoPath: path.join(videosDir, `${baseName}_stitched.mp4`),
+      finalVideoPath: path.join(videosDir, `${baseName}.mp4`),
+    });
   } catch (err) {
     if (err.message.includes('ffmpeg')) {
       console.error('\nffmpeg is required for stitching clips. Install it with:');
@@ -394,12 +373,13 @@ async function runClipPipeline({ mdPath, baseName, videosDir, settings, dryRun }
     throw err;
   }
 
-  const finalPath = path.join(videosDir, `${baseName}.mp4`);
+  const stitchedPath = result.stitchedPath;
+  const finalPath = result.finalPath;
   console.log('\n[5/5] Burning on-video dialogue captions...');
   try {
     await burnCaptions({
       mdPath,
-      clipsDir: outputDir,
+      clipsDir: path.join(videosDir, 'clips'),
       inputVideo: stitchedPath,
       outputVideo: finalPath,
     });
@@ -411,7 +391,7 @@ async function runClipPipeline({ mdPath, baseName, videosDir, settings, dryRun }
   }
 
   console.log(`\n=== Done! ===`);
-  console.log(`Clips generated: ${clipPaths.length}/${clips.length}`);
+  console.log(`Clips generated: ${result.clipPaths.length}/${plan.jobs.length}`);
   console.log(`Final video: ${finalPath}`);
 }
 
@@ -429,7 +409,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (!opts.topic) {
     console.error('Usage: node code/cli/video.js "topic" [--template id] [--clips N] [--clip-duration N] [--target-length N] [--output-name slug] [--md path] [--dry-run]');
     console.error('Legacy alias: --format hero|villain');
-    console.error('Example: node code/cli/video.js "a tiny office feud between mascot characters" --template story-driven-character-drama --md output/videos/mascot-feud/mascot-feud.md');
+    console.error('Example: node code/cli/video.js "absurd fruit revenge story in a dessert banquet hall" --template anthropomorphic-fruit-revenge-drama --md output/videos/fruit-revenge/fruit-revenge.md');
     process.exit(1);
   }
 

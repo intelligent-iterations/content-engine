@@ -16,7 +16,11 @@ function parseSlot(argv) {
 
 async function main() {
   const slot = parseSlot(process.argv.slice(2));
+  const dryRun = process.argv.includes('--dry-run');
   console.log(`TikTok slot: ${slot}`);
+  if (dryRun) {
+    process.argv.push('--dry-run');
+  }
   return autoPostTikTokVideo();
 }
 

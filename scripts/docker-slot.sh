@@ -2,14 +2,29 @@
 set -eu
 
 if [ "$#" -lt 2 ]; then
-  echo "Usage: scripts/docker-slot.sh <instagram|x|tiktok> <slot>" >&2
+  echo "Usage: scripts/docker-slot.sh <instagram|x|tiktok> <slot> [extra args...]" >&2
   exit 1
 fi
 
 PLATFORM="$1"
 SLOT="$2"
+shift 2
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-DOCKER_BIN="${DOCKER_BIN:-docker}"
+DOCKER_BIN="${DOCKER_BIN:-}"
+
+if [ -z "$DOCKER_BIN" ]; then
+  for candidate in /opt/homebrew/bin/docker /usr/local/bin/docker docker; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      DOCKER_BIN="$(command -v "$candidate")"
+      break
+    fi
+  done
+fi
+
+if [ -z "$DOCKER_BIN" ]; then
+  echo "docker not found. Set DOCKER_BIN or install Docker in a launchd-visible path." >&2
+  exit 127
+fi
 
 case "$PLATFORM" in
   instagram)
@@ -31,4 +46,4 @@ case "$PLATFORM" in
 esac
 
 cd "$ROOT_DIR"
-exec "$DOCKER_BIN" compose run --rm --no-deps "$SERVICE" node "$SCRIPT" "$SLOT"
+exec "$DOCKER_BIN" compose run --rm --no-deps "$SERVICE" node "$SCRIPT" "$SLOT" "$@"
