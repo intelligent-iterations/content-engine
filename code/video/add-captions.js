@@ -79,7 +79,7 @@ function getCaptionLayout(videoWidth, videoHeight) {
   const maxCharsPerLine = portrait ? 22 : 36;
   const outlineSize = clamp(Math.round(fontSize * 0.08), 2, 4);
   const shadowSize = 0;
-  const bottomMargin = Math.round(videoHeight * (portrait ? 0.075 : 0.065));
+  const bottomMargin = Math.round(videoHeight * (portrait ? 0.145 : 0.085));
 
   return {
     fontSize,

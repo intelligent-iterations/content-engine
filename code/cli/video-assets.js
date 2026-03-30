@@ -3,7 +3,13 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-import { generateImage, downloadImage, IMAGE_MODELS, normalizeImageBufferForOutputPath } from '../shared/generate-image.js';
+import {
+  generateImage,
+  downloadImage,
+  IMAGE_MODELS,
+  normalizeImageBufferForOutputPath,
+  padImageBufferToAspectRatio,
+} from '../shared/generate-image.js';
 import {
   assetManifestPathForRun,
   loadAssetManifest,
@@ -86,8 +92,28 @@ function resolveManifestPath(opts) {
   return assetManifestPathForRun(inferRunDir(opts));
 }
 
-async function writeImageToPath(imageResult, destinationPath) {
-  const buffer = await downloadImage(imageResult);
+function outputFormatForPath(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') {
+    return 'jpeg';
+  }
+  if (ext === '.webp') {
+    return 'webp';
+  }
+  return 'png';
+}
+
+async function writeImageToPath(imageResult, destinationPath, options = {}) {
+  let buffer = await downloadImage(imageResult);
+
+  if (options.normalizeAspectRatio) {
+    buffer = await padImageBufferToAspectRatio(buffer, {
+      aspectRatio: options.aspectRatio,
+      resolution: options.resolution,
+      outputFormat: outputFormatForPath(destinationPath),
+    });
+  }
+
   const normalizedBuffer = await normalizeImageBufferForOutputPath(buffer, destinationPath);
   fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
   fs.writeFileSync(destinationPath, normalizedBuffer);
@@ -123,9 +149,11 @@ async function generateFromPrompt(prompt, destinationPath, force = false, option
       outDir: path.dirname(destinationPath),
       referenceImages,
       allowLetterCharacters: options.allowLetterCharacters,
+      aspectRatio: options.aspectRatio,
+      resolution: options.resolution,
     }
   );
-  await writeImageToPath(imageResult, destinationPath);
+  await writeImageToPath(imageResult, destinationPath, options);
   return true;
 }
 
@@ -204,6 +232,8 @@ function printVerificationSummary(toolPlan, stage) {
 
 async function runStage(opts, stage) {
   const { toolPlan } = resolveToolPlan(opts);
+  const manifest = loadAssetManifest(toolPlan.manifest_path);
+  const renderSettings = manifest.render_settings || {};
   const jobs = filterJobsByStage(toolPlan, stage, ['generate_image']);
   let generated = 0;
 
@@ -212,6 +242,9 @@ async function runStage(opts, stage) {
       manifestDir: path.dirname(toolPlan.manifest_path),
       referenceImagePaths: job.reference_image_paths || [],
       allowLetterCharacters: job.allow_letter_characters,
+      aspectRatio: renderSettings.aspect_ratio,
+      resolution: renderSettings.resolution,
+      normalizeAspectRatio: stage === 'scene-frames',
     });
     if (changed) {
       generated += 1;

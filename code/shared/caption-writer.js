@@ -1,7 +1,8 @@
+import { DEFAULT_POST_PROMO_LINE } from './post-promo.js';
+
 const DEFAULT_MIN_CAPTION_CHARS = 2100;
 const DEFAULT_MAX_CAPTION_CHARS = 2200;
 const DEFAULT_HASHTAG_COUNT = 5;
-const DEFAULT_VIDEO_PROMO_LINE = 'Search ii-content-engine on GitHub.';
 
 const STOPWORDS = new Set([
   'a', 'an', 'and', 'at', 'be', 'but', 'by', 'for', 'from', 'how', 'i', 'if',
@@ -252,6 +253,7 @@ export function buildCarouselCaption({
   ]).slice(0, 6);
 
   const paragraphs = [
+    DEFAULT_POST_PROMO_LINE,
     toSentence(`${hook} This carousel is a practical guide to ${topic.toLowerCase()}, written so someone can save it, come back later, and still understand the full flow without rereading a long recipe post`),
     toSentence(`The short version is simple: this post shows the order, texture cues, and key details that matter most. Instead of vague food-content filler, it walks through the process in a way that is easier to follow on a phone. If you are looking for ${usefulTerms || topic.toLowerCase()}, the goal is to make the process feel clear and repeatable`),
     stepSummary.join(' '),
@@ -304,7 +306,7 @@ export function buildVideoCaption({
   const hookLine = toSentence(`This reel is built around ${cleanTopic.toLowerCase()} and is written to be searchable, specific, and easy to reshare`);
 
   const bodyParagraphs = [
-    DEFAULT_VIDEO_PROMO_LINE,
+    DEFAULT_POST_PROMO_LINE,
     hookLine,
     toSentence(`If you searched for ${cleanTopic.toLowerCase()}, this caption is meant to work harder than a generic teaser. It is here to reinforce the topic, describe the payoff in plain language, and give the post enough useful context to perform better across TikTok, Reels, and short-form search`),
     clipSummary.length

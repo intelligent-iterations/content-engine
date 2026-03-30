@@ -93,12 +93,13 @@ Before authoring prompts, assets, or render jobs:
 - If `XAI_API_KEY` is missing but a saved Grok web session exists, continue with the browser automation path from the saved artifacts rather than stopping at markdown/research generation.
 - Before treating a video render as blocked, check for browser-session fallback files such as `auth/grok-session-cookies.json` or `auth/grok-storage-state.json`.
 - Caption nudge: carousel captions and reel/video captions should usually land between 2100 and 2200 characters, front-load the hook in the first 125 characters, stay SEO-friendly, and use the local caption-writing fallback instead of treating missing `XAI_API_KEY` as a caption blocker.
-- Posted-video default: every scheduled video should include the standard appended promo clip from `/Users/admin/Documents/plug.mov`, and the scheduled caption should begin with `Search ii-content-engine on GitHub.`
+- Posted-video default: queued videos should stay raw in `output/scheduled_videos/`, the standard promo clip from `/Users/admin/Documents/plug.mov` should be appended immediately before each platform post attempt, and the caption opener should be `Make videos like this by searching ii-content-engine on GitHub.`
 - For stitched multi-clip videos, treat continuity as a first-order requirement: the script, acting beats, character design, wardrobe, environment, and cinematic style should survive across clips unless the format explicitly calls for change.
 - If continuity matters across clips, prefer image-conditioned generation and reference-image reuse whenever the toolchain supports it. Do not let each clip reinvent the same character, environment, object, or world style from scratch if that can be avoided.
 - For continuity-sensitive character stories, the required default asset chain is:
   `hero portrait -> derived character sheet -> scene start frames -> video`
 - For continuity-sensitive character stories, the scene-start-frame stage should normally use the ordered approved character sheets as its reference inputs.
+- For continuity-sensitive character stories, scene-start-frame assets should be saved at the target render aspect ratio, normally portrait `9:16`, rather than left as landscape references.
 - For continuity-sensitive character stories, do not jump straight from markdown to video render if the required asset chain has not been generated from saved repo state.
 - The video system supports both `per_clip` image-to-video references and `shared_reference` reuse across clips. Use `per_clip` for isolated beats or loose compilations; use `shared_reference` whenever a stitched sequence depends on continuity of characters, environments, objects, or overall world style.
 - If native dialogue harms acting quality, reduce dialogue complexity and let visuals or captions carry more of the story.

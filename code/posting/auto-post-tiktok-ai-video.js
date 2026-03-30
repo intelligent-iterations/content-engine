@@ -14,10 +14,17 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { postToTikTok } from './tiktok-browser-post.js';
-import { listScheduledItems, updateScheduledPlatformPost } from '../shared/scheduled-queue.js';
+import {
+  listScheduledPlatformItems,
+  prepareScheduledVideoForPlatform,
+  recordScheduledPlatformFailure,
+  updateScheduledPlatformPost,
+} from '../shared/scheduled-queue.js';
+import { normalizeCaptionForPosting } from '../shared/post-promo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, '..', '..');
+const PLATFORM = 'tiktok';
 
 dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 
@@ -28,21 +35,22 @@ const POSTS_PER_RUN = 1;
  */
 async function postOneVideo(item) {
   const video = item.manifest;
-  const videoFilePath = path.join(REPO_ROOT, video.assets.video_path);
+  const prepared = prepareScheduledVideoForPlatform(item, PLATFORM);
+  const videoFilePath = prepared.preparedVideoPath;
   if (!fs.existsSync(videoFilePath)) {
-    console.error(`  File not found: ${video.assets.video_path}`);
+    console.error(`  File not found: ${path.relative(REPO_ROOT, videoFilePath)}`);
     return null;
   }
 
   const fileSizeMB = (fs.statSync(videoFilePath).size / (1024 * 1024)).toFixed(1);
-  console.log(`  File: ${video.assets.video_path} (${fileSizeMB} MB)`);
+  console.log(`  File: ${path.relative(REPO_ROOT, videoFilePath)} (${fileSizeMB} MB)`);
 
   // Load caption
-  let caption = `${video.id} #content #video`;
+  let caption = normalizeCaptionForPosting(`${video.id} #content #video`);
   if (video.assets.caption_path) {
     const captionFilePath = path.join(REPO_ROOT, video.assets.caption_path);
     if (fs.existsSync(captionFilePath)) {
-      caption = fs.readFileSync(captionFilePath, 'utf-8').trim();
+      caption = normalizeCaptionForPosting(fs.readFileSync(captionFilePath, 'utf-8'));
       console.log(`  Caption loaded (${caption.length} chars)`);
     }
   } else {
@@ -64,7 +72,7 @@ async function postOneVideo(item) {
   updateScheduledPlatformPost('video', item.dir, 'tiktok', {
     post_id: postId,
     permalink: result.postUrl,
-    source_file: video.assets.video_path,
+    source_file: prepared.manifest.queue?.platforms?.[PLATFORM]?.prepared_video_path || video.assets.video_path,
   });
 
   return { postId, postUrl: result.postUrl };
@@ -83,18 +91,16 @@ async function autoPostTikTokVideo() {
   console.log('='.repeat(50));
   console.log();
 
-  const allVideos = listScheduledItems('video');
+  const allVideos = listScheduledPlatformItems('video', PLATFORM);
   console.log(`Total scheduled videos: ${allVideos.length}`);
+  console.log(`Ready for TikTok: ${allVideos.length}`);
 
-  const unposted = allVideos.filter(item => !item.manifest.posts?.tiktok?.permalink);
-  console.log(`Unposted to TikTok: ${unposted.length}`);
-
-  if (unposted.length === 0) {
+  if (allVideos.length === 0) {
     console.log('\nNo unposted scheduled videos available!');
     return { success: false, reason: 'no_unposted_content' };
   }
 
-  const batch = unposted.slice(0, POSTS_PER_RUN);
+  const batch = allVideos.slice(0, POSTS_PER_RUN);
   console.log(`\nPosting ${batch.length} video(s) this run:\n`);
 
   const results = [];
@@ -123,6 +129,7 @@ async function autoPostTikTokVideo() {
       }
     } catch (err) {
       console.error(`  FAILED: ${err.message}`);
+      recordScheduledPlatformFailure('video', video.dir, PLATFORM, err);
       console.log();
     }
   }

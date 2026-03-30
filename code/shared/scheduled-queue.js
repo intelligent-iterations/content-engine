@@ -9,15 +9,15 @@ import {
   SCHEDULED_VIDEOS_DIR,
   VIDEOS_DIR,
 } from '../core/paths.js';
+import {
+  DEFAULT_POST_PROMO_LINE,
+  normalizeCaptionForPosting,
+} from './post-promo.js';
 
 const SCHEDULE_FILE = 'schedule.json';
 const DEFAULT_POST_OUTRO_PATH = '/Users/admin/Documents/plug.mov';
-const DEFAULT_POST_CAPTION_LINE = 'Search ii-content-engine on GitHub.';
-const LEGACY_POST_CAPTION_PATTERNS = [
-  /make these videos using content engine on github!? just search up ii content engine\.?/i,
-  /make these videos using content engine on github!? just search up content-engine\.?/i,
-  /search ii-content-engine on github\.?/i,
-];
+const DEFAULT_RETRY_DELAY_MS = 15 * 60 * 1000;
+const MAX_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -43,6 +43,10 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
+function isoNow() {
+  return new Date().toISOString();
+}
+
 function rewriteRelativePathPrefix(value, fromPrefix, toPrefix) {
   const normalized = String(value || '');
   if (!normalized || !normalized.startsWith(fromPrefix)) {
@@ -55,6 +59,127 @@ function manifestPlatformsForType(type, manifest) {
   const fallback = defaultPlatforms(type);
   const posts = manifest?.posts || fallback;
   return Object.keys(posts);
+}
+
+function defaultQueueState(type, manifest = {}) {
+  const queuedAt = manifest.scheduled_at || isoNow();
+  const platformStates = {};
+
+  for (const platform of manifestPlatformsForType(type, manifest)) {
+    platformStates[platform] = {
+      status: manifest?.posts?.[platform]?.permalink ? 'posted' : 'queued',
+      queued_at: queuedAt,
+      last_attempt_at: null,
+      next_attempt_at: queuedAt,
+      retry_count: 0,
+      last_error: null,
+      prepared_video_path: null,
+    };
+  }
+
+  return {
+    overall: {
+      status: isManifestFullyPosted(type, manifest) ? 'posted' : 'queued',
+      queued_at: queuedAt,
+      last_prepared_at: null,
+    },
+    platforms: platformStates,
+  };
+}
+
+function ensureQueueState(type, manifest) {
+  const fallback = defaultQueueState(type, manifest);
+  let changed = false;
+
+  manifest.queue = manifest.queue && typeof manifest.queue === 'object'
+    ? manifest.queue
+    : {};
+
+  if (!manifest.queue.overall || typeof manifest.queue.overall !== 'object') {
+    manifest.queue.overall = fallback.overall;
+    changed = true;
+  } else {
+    for (const [key, value] of Object.entries(fallback.overall)) {
+      if (manifest.queue.overall[key] == null) {
+        manifest.queue.overall[key] = value;
+        changed = true;
+      }
+    }
+  }
+
+  manifest.queue.platforms = manifest.queue.platforms && typeof manifest.queue.platforms === 'object'
+    ? manifest.queue.platforms
+    : {};
+
+  for (const [platform, state] of Object.entries(fallback.platforms)) {
+    if (!manifest.queue.platforms[platform] || typeof manifest.queue.platforms[platform] !== 'object') {
+      manifest.queue.platforms[platform] = state;
+      changed = true;
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(state)) {
+      if (manifest.queue.platforms[platform][key] == null) {
+        manifest.queue.platforms[platform][key] = value;
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
+}
+
+function ensureScheduledManifestDefaults(type, manifest) {
+  let changed = ensureQueueState(type, manifest);
+
+  manifest.post_defaults = manifest.post_defaults && typeof manifest.post_defaults === 'object'
+    ? manifest.post_defaults
+    : {};
+
+  const expectedPostDefaults = {
+    promo_line: DEFAULT_POST_PROMO_LINE,
+    outro_path: DEFAULT_POST_OUTRO_PATH,
+    append_outro_before_post: true,
+  };
+
+  for (const [key, value] of Object.entries(expectedPostDefaults)) {
+    if (manifest.post_defaults[key] == null) {
+      manifest.post_defaults[key] = value;
+      changed = true;
+    }
+  }
+
+  if (type === 'video') {
+    manifest.assets = manifest.assets && typeof manifest.assets === 'object' ? manifest.assets : {};
+    if (!manifest.assets.raw_video_path && manifest.assets.video_path) {
+      manifest.assets.raw_video_path = manifest.assets.video_path;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function retryDelayMs(retryCount) {
+  return Math.min(MAX_RETRY_DELAY_MS, DEFAULT_RETRY_DELAY_MS * Math.max(1, 2 ** Math.max(0, retryCount - 1)));
+}
+
+function platformQueueState(manifest, platform) {
+  return manifest?.queue?.platforms?.[platform] || null;
+}
+
+function isPlatformReady(type, manifest, platform) {
+  if (manifest?.posts?.[platform]?.permalink) {
+    return false;
+  }
+
+  const state = platformQueueState(manifest, platform) || defaultQueueState(type, manifest).platforms[platform];
+  const nextAttempt = state?.next_attempt_at ? Date.parse(state.next_attempt_at) : 0;
+  if (Number.isFinite(nextAttempt) && nextAttempt > Date.now()) {
+    return false;
+  }
+
+  return true;
 }
 
 function isManifestFullyPosted(type, manifest) {
@@ -83,6 +208,10 @@ function loadManifestFromDir(itemDir) {
   }
 
   const manifest = readJson(manifestPath);
+  const changed = ensureScheduledManifestDefaults(manifest.type, manifest);
+  if (changed) {
+    writeJson(manifestPath, manifest);
+  }
   return {
     dir: itemDir,
     manifestPath,
@@ -102,6 +231,24 @@ export function listScheduledItems(type) {
       const aTime = a.manifest.scheduled_at || '';
       const bTime = b.manifest.scheduled_at || '';
       return aTime.localeCompare(bTime);
+    });
+}
+
+export function listScheduledPlatformItems(type, platform) {
+  return listScheduledItems(type)
+    .filter((item) => isPlatformReady(type, item.manifest, platform))
+    .sort((a, b) => {
+      const aState = platformQueueState(a.manifest, platform) || {};
+      const bState = platformQueueState(b.manifest, platform) || {};
+      const aRetry = Number(aState.retry_count) || 0;
+      const bRetry = Number(bState.retry_count) || 0;
+      if (aRetry !== bRetry) {
+        return aRetry - bRetry;
+      }
+
+      const aNext = aState.next_attempt_at || a.manifest.scheduled_at || '';
+      const bNext = bState.next_attempt_at || b.manifest.scheduled_at || '';
+      return aNext.localeCompare(bNext);
     });
 }
 
@@ -125,11 +272,21 @@ export function updateScheduledPlatformPost(type, itemDir, platform, details) {
   }
 
   item.manifest.posts = item.manifest.posts || defaultPlatforms(type);
+  ensureQueueState(type, item.manifest);
   item.manifest.posts[platform] = {
     ...details,
     platform,
-    posted_at: details.posted_at || new Date().toISOString(),
+    posted_at: details.posted_at || isoNow(),
   };
+  item.manifest.queue.platforms[platform] = {
+    ...item.manifest.queue.platforms[platform],
+    status: 'posted',
+    posted_at: item.manifest.posts[platform].posted_at,
+    last_attempt_at: item.manifest.posts[platform].posted_at,
+    next_attempt_at: null,
+    last_error: null,
+  };
+  item.manifest.queue.overall.status = isManifestFullyPosted(type, item.manifest) ? 'posted' : 'queued';
 
   writeJson(item.manifestPath, item.manifest);
 
@@ -162,9 +319,11 @@ export function archiveScheduledVideoItem(itemDir) {
   }
 
   const manifest = movedItem.manifest;
-  manifest.archived_from_queue_at = new Date().toISOString();
+  manifest.archived_from_queue_at = isoNow();
   manifest.queue_status = 'posted';
   manifest.archived_from = oldRelativeDir;
+  ensureQueueState('video', manifest);
+  manifest.queue.overall.status = 'posted';
 
   if (manifest.assets) {
     for (const [key, value] of Object.entries(manifest.assets)) {
@@ -178,6 +337,14 @@ export function archiveScheduledVideoItem(itemDir) {
     for (const post of Object.values(manifest.posts)) {
       if (post && typeof post === 'object' && typeof post.source_file === 'string') {
         post.source_file = rewriteRelativePathPrefix(post.source_file, oldRelativeDir, newRelativeDir);
+      }
+    }
+  }
+
+  if (manifest.queue?.platforms && typeof manifest.queue.platforms === 'object') {
+    for (const state of Object.values(manifest.queue.platforms)) {
+      if (state && typeof state === 'object' && typeof state.prepared_video_path === 'string') {
+        state.prepared_video_path = rewriteRelativePathPrefix(state.prepared_video_path, oldRelativeDir, newRelativeDir);
       }
     }
   }
@@ -210,26 +377,6 @@ function copyFileIfPresent(fromPath, toPath) {
   }
 }
 
-function normalizeCaptionForPosting(caption) {
-  const body = String(caption || '')
-    .split('\n')
-    .filter((line) => !LEGACY_POST_CAPTION_PATTERNS.some((pattern) => pattern.test(line.trim())))
-    .join('\n')
-    .trim();
-  const promo = DEFAULT_POST_CAPTION_LINE;
-
-  if (!body) {
-    return promo;
-  }
-
-  const lines = body.split('\n').map(line => line.trim());
-  if (lines[0]?.toLowerCase() === promo.toLowerCase()) {
-    return body;
-  }
-
-  return `${promo}\n\n${body}`;
-}
-
 function appendPostOutro(sourceVideoPath, targetVideoPath) {
   if (!fs.existsSync(DEFAULT_POST_OUTRO_PATH)) {
     throw new Error(`Required post outro clip not found: ${DEFAULT_POST_OUTRO_PATH}`);
@@ -253,18 +400,103 @@ function appendPostOutro(sourceVideoPath, targetVideoPath) {
   ], { stdio: 'pipe' });
 }
 
+function resolveQueuedVideoSource(item) {
+  const candidates = [];
+  const sourceFolder = item?.manifest?.source?.folder;
+  if (sourceFolder) {
+    const sourceDir = path.join(ROOT_DIR, sourceFolder);
+    const baseName = path.basename(sourceDir);
+    candidates.push(path.join(sourceDir, `${baseName}.mp4`));
+  }
+
+  const rawVideoPath = item?.manifest?.assets?.raw_video_path;
+  if (rawVideoPath) {
+    candidates.push(path.join(ROOT_DIR, rawVideoPath));
+  }
+
+  const queuedVideoPath = item?.manifest?.assets?.video_path;
+  if (queuedVideoPath) {
+    candidates.push(path.join(ROOT_DIR, queuedVideoPath));
+  }
+
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
+}
+
+export function prepareScheduledVideoForPlatform(item, platform) {
+  if (!item?.manifest || item.manifest.type !== 'video') {
+    throw new Error('prepareScheduledVideoForPlatform requires a scheduled video item.');
+  }
+
+  ensureQueueState('video', item.manifest);
+
+  const sourceVideoPath = resolveQueuedVideoSource(item);
+  if (!sourceVideoPath) {
+    throw new Error(`Missing source video for scheduled item ${item.manifest.id}`);
+  }
+
+  const preparedDir = path.join(item.dir, 'platform-renders', platform);
+  ensureDir(preparedDir);
+  const preparedPath = path.join(preparedDir, `${item.manifest.id}-${platform}.mp4`);
+  appendPostOutro(sourceVideoPath, preparedPath);
+
+  const preparedAt = isoNow();
+  item.manifest.queue.platforms[platform] = {
+    ...item.manifest.queue.platforms[platform],
+    status: 'prepared',
+    prepared_video_path: relativeToRepo(preparedPath),
+    last_attempt_at: preparedAt,
+    next_attempt_at: preparedAt,
+    last_error: null,
+  };
+  item.manifest.queue.overall.last_prepared_at = preparedAt;
+  writeJson(item.manifestPath, item.manifest);
+
+  return {
+    ...item,
+    manifest: item.manifest,
+    preparedVideoPath: preparedPath,
+  };
+}
+
+export function recordScheduledPlatformFailure(type, itemDir, platform, error) {
+  const item = loadManifestFromDir(itemDir);
+  if (!item) {
+    throw new Error(`Missing scheduled manifest in ${itemDir}`);
+  }
+
+  ensureQueueState(type, item.manifest);
+  const now = Date.now();
+  const state = item.manifest.queue.platforms[platform] || defaultQueueState(type, item.manifest).platforms[platform];
+  const retryCount = (Number(state.retry_count) || 0) + 1;
+  const nextAttemptAt = new Date(now + retryDelayMs(retryCount)).toISOString();
+
+  item.manifest.queue.platforms[platform] = {
+    ...state,
+    status: 'failed',
+    retry_count: retryCount,
+    last_attempt_at: new Date(now).toISOString(),
+    next_attempt_at: nextAttemptAt,
+    last_error: String(error?.message || error || 'Unknown posting error'),
+  };
+
+  writeJson(item.manifestPath, item.manifest);
+  return item.manifest;
+}
+
 export function scheduleVideo(sourceDir, options = {}) {
   const resolvedSource = path.resolve(sourceDir);
   const assets = detectVideoAssets(resolvedSource);
   const slug = safeSlug(options.slug || assets.baseName, assets.baseName);
+  const scheduledAt = isoNow();
   const targetDir = path.join(SCHEDULED_VIDEOS_DIR, slug);
+  fs.rmSync(targetDir, { recursive: true, force: true });
   ensureDir(targetDir);
 
   const targetVideoPath = path.join(targetDir, `${slug}.mp4`);
   const targetCaptionPath = path.join(targetDir, `${slug}_caption.txt`);
   const targetMdPath = path.join(targetDir, `${slug}.md`);
 
-  appendPostOutro(assets.videoPath, targetVideoPath);
+  fs.copyFileSync(assets.videoPath, targetVideoPath);
 
   if (assets.captionPath && fs.existsSync(assets.captionPath)) {
     const caption = fs.readFileSync(assets.captionPath, 'utf8');
@@ -276,16 +508,27 @@ export function scheduleVideo(sourceDir, options = {}) {
   const manifest = {
     id: slug,
     type: 'video',
-    scheduled_at: new Date().toISOString(),
+    scheduled_at: scheduledAt,
     source: {
       folder: relativeToRepo(resolvedSource),
     },
     assets: {
       video_path: relativeToRepo(targetVideoPath),
+      raw_video_path: relativeToRepo(targetVideoPath),
       caption_path: fs.existsSync(targetCaptionPath) ? relativeToRepo(targetCaptionPath) : null,
       compilation_path: fs.existsSync(targetMdPath) ? relativeToRepo(targetMdPath) : null,
     },
     posts: defaultPlatforms('video'),
+    queue: defaultQueueState('video', {
+      type: 'video',
+      scheduled_at: scheduledAt,
+      posts: defaultPlatforms('video'),
+    }),
+    post_defaults: {
+      promo_line: DEFAULT_POST_PROMO_LINE,
+      outro_path: DEFAULT_POST_OUTRO_PATH,
+      append_outro_before_post: true,
+    },
   };
 
   writeJson(path.join(targetDir, SCHEDULE_FILE), manifest);
@@ -313,7 +556,7 @@ export function scheduleCarousel(sourceDir, options = {}) {
   const manifest = {
     id: slug,
     type: 'carousel',
-    scheduled_at: new Date().toISOString(),
+    scheduled_at: isoNow(),
     source: {
       folder: relativeToRepo(resolvedSource),
     },

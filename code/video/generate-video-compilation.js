@@ -4,7 +4,6 @@ import path from 'path';
 import axios from 'axios';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import sharp from 'sharp';
 import { AUTH_DIR, ROOT_DIR, isMainModule } from '../core/paths.js';
 import {
   buildVideoExecutionPlan,
@@ -17,6 +16,7 @@ import {
   IMAGE_MODELS,
   detectMimeTypeFromBuffer,
   normalizeImageBufferForOutputPath,
+  padImageBufferToAspectRatio,
 } from '../shared/generate-image.js';
 
 const XAI_API_KEY = process.env.XAI_API_KEY;
@@ -214,19 +214,6 @@ async function prepareReferenceImageForVideo(referenceImagePath, options = {}) {
     return referenceImagePath;
   }
 
-  const { width: targetWidth, height: targetHeight } = resolveTargetImageSize(options.aspectRatio, options.resolution);
-  const metadata = await sharp(referenceImagePath).metadata();
-  const sourceWidth = Number(metadata.width) || 0;
-  const sourceHeight = Number(metadata.height) || 0;
-
-  if (!sourceWidth || !sourceHeight) {
-    return referenceImagePath;
-  }
-
-  if (aspectDelta(sourceWidth, sourceHeight, targetWidth, targetHeight) < 0.01) {
-    return referenceImagePath;
-  }
-
   const preparedDir = path.join(path.dirname(options.outputDir || path.dirname(referenceImagePath)), 'prepared-video-refs');
   ensureDir(preparedDir);
   const preparedPath = path.join(
@@ -234,25 +221,14 @@ async function prepareReferenceImageForVideo(referenceImagePath, options = {}) {
     `clip${String(options.clipNum || 0).padStart(2, '0')}-${sanitizeFileName(options.clipName || path.basename(referenceImagePath, path.extname(referenceImagePath)))}.png`
   );
 
-  const background = await sharp(referenceImagePath)
-    .resize(targetWidth, targetHeight, { fit: 'cover' })
-    .blur(20)
-    .modulate({ brightness: 0.78, saturation: 0.9 })
-    .png()
-    .toBuffer();
-
-  const foreground = await sharp(referenceImagePath)
-    .resize(targetWidth, targetHeight, {
-      fit: 'contain',
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    })
-    .png()
-    .toBuffer();
-
-  await sharp(background)
-    .composite([{ input: foreground }])
-    .png()
-    .toFile(preparedPath);
+  const sourceBuffer = fs.readFileSync(referenceImagePath);
+  const paddedBuffer = await padImageBufferToAspectRatio(sourceBuffer, {
+    aspectRatio: options.aspectRatio,
+    resolution: options.resolution,
+    outputFormat: 'png',
+  });
+  const normalizedBuffer = await normalizeImageBufferForOutputPath(paddedBuffer, preparedPath);
+  fs.writeFileSync(preparedPath, normalizedBuffer);
 
   return preparedPath;
 }
