@@ -8,6 +8,11 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import sharp from 'sharp';
 import { AUTH_DIR, ROOT_DIR, TEMP_DIR } from '../core/paths.js';
+import {
+  assertSpendWithinLimit,
+  estimateXaiImageCost,
+  recordApiSpend,
+} from './api-spend-tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,11 +22,20 @@ const RATE_LIMIT_WAIT = 5000; // 5 seconds between requests
 const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
+const DEFAULT_X_COOKIES_PATH = path.join(ROOT_DIR, 'cookies', 'x_cookies.json');
 const DEFAULT_BROWSER_IMAGE_DOWNLOAD_DIR = path.join(TEMP_DIR, 'grok-images');
 
 export const IMAGE_MODELS = {
   grok: 'grok'
 };
+
+function envFlagEnabled(value) {
+  return String(value || '').trim().toLowerCase() === 'true';
+}
+
+export function isBrowserOverrideEnabled() {
+  return envFlagEnabled(process.env.BROWSER_OVERRIDE);
+}
 
 function shouldAllowLetterCharacters(prompt, options = {}) {
   if (options.allowLetterCharacters) {
@@ -89,6 +103,23 @@ export function resolveTargetImageSize(aspectRatio = '9:16', resolution = '720p'
     width: Math.round(shortSide * (ratio.width / ratio.height)),
     height: shortSide,
   };
+}
+
+function normalizeImageResolution(resolution = '') {
+  const value = String(resolution || '').trim().toLowerCase();
+  if (!value) {
+    return null;
+  }
+
+  if (value === '1k' || value === '2k') {
+    return value;
+  }
+
+  if (value.includes('1080') || value.includes('2k')) {
+    return '2k';
+  }
+
+  return '1k';
 }
 
 function aspectDelta(width, height, targetWidth, targetHeight) {
@@ -259,6 +290,7 @@ async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 
   const { aspectRatio, resolution } = options;
   const referenceImages = normalizeReferenceImages(options.referenceImages || options.referenceImage);
   const hasReferenceImages = referenceImages.length > 0;
+  const model = 'grok-imagine-image';
 
   if (hasReferenceImages) {
     console.log('Starting Grok IMAGE EDIT generation...');
@@ -277,8 +309,9 @@ async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 
     body.aspect_ratio = aspectRatio;
   }
 
-  if (resolution) {
-    body.resolution = resolution;
+  const imageResolution = normalizeImageResolution(resolution);
+  if (imageResolution) {
+    body.resolution = imageResolution;
   }
 
   if (referenceImages.length === 1) {
@@ -298,6 +331,18 @@ async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 
   const endpoint = hasReferenceImages
     ? 'https://api.x.ai/v1/images/edits'
     : 'https://api.x.ai/v1/images/generations';
+  const estimatedCostUsd = estimateXaiImageCost({
+    model,
+    imageCount: 1,
+    inputImageCount: referenceImages.length,
+  });
+
+  assertSpendWithinLimit({
+    provider: 'xai',
+    operation: hasReferenceImages ? 'images.edit' : 'images.generate',
+    model,
+    projectedCostUsd: estimatedCostUsd || 0,
+  });
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -329,10 +374,30 @@ async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 
   }
 
   const data = await response.json();
+  const actualCostUsd = estimateXaiImageCost({
+    model,
+    imageCount: Number(data?.data?.length) || 1,
+    inputImageCount: referenceImages.length,
+  });
 
   if (!data.data || !data.data[0] || !data.data[0].url) {
     throw new Error(`Unexpected Grok response format: ${JSON.stringify(data)}`);
   }
+
+  recordApiSpend({
+    provider: 'xai',
+    operation: hasReferenceImages ? 'images.edit' : 'images.generate',
+    model,
+    costUsd: actualCostUsd || 0,
+    estimatedCostUsd,
+    metadata: {
+      aspect_ratio: aspectRatio || null,
+      resolution: resolution || null,
+      input_image_count: referenceImages.length,
+      output_image_count: Number(data?.data?.length) || 1,
+      endpoint,
+    },
+  });
 
   console.log('Grok image generation complete!');
   return data.data[0].url;
@@ -343,7 +408,8 @@ function resolveGrokWebSessionPath() {
     process.env.GROK_WEB_COOKIES_PATH,
     process.env.GROK_WEB_STATE_PATH,
     DEFAULT_GROK_STORAGE_PATH,
-    DEFAULT_GROK_COOKIES_PATH
+    DEFAULT_GROK_COOKIES_PATH,
+    DEFAULT_X_COOKIES_PATH
   ].filter(Boolean);
 
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
@@ -353,11 +419,14 @@ function buildGrokWebSessionArgs(sessionPath) {
   try {
     const raw = fs.readFileSync(sessionPath, 'utf8');
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) || Array.isArray(parsed?.cookies)) {
+    if (Array.isArray(parsed)) {
       return ['--cookies', sessionPath];
     }
     if (Array.isArray(parsed?.origins)) {
       return ['--state', sessionPath];
+    }
+    if (Array.isArray(parsed?.cookies)) {
+      return ['--cookies', sessionPath];
     }
   } catch {
     // Fall back to filename heuristics below.
@@ -463,7 +532,11 @@ export async function generateImage(tokens, prompt, options = {}) {
     cleanPrompt = cleanPrompt + noTextSuffix;
   }
 
-  if (!tokens.xaiApiKey) {
+  const forceBrowser = isBrowserOverrideEnabled();
+  if (!tokens.xaiApiKey || forceBrowser) {
+    if (forceBrowser) {
+      console.log('BROWSER_OVERRIDE=true detected, forcing Grok browser image generation...');
+    }
     return generateImageViaBrowser(cleanPrompt, options);
   }
 

@@ -98,6 +98,7 @@ For scene frames:
 - attach all visible recurring characters
 - prefer approved sheets as the default references
 - keep the clip's intended character order when attaching references
+- save continuity assets in the run's target aspect ratio; for vertical stories, portraits, sheets, and scene frames should all be portrait files
 - keep one dramatic beat per scene
 - use strong props when useful
 

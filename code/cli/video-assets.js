@@ -9,6 +9,7 @@ import {
   IMAGE_MODELS,
   normalizeImageBufferForOutputPath,
   padImageBufferToAspectRatio,
+  parseAspectRatio,
 } from '../shared/generate-image.js';
 import {
   assetManifestPathForRun,
@@ -119,14 +120,22 @@ async function writeImageToPath(imageResult, destinationPath, options = {}) {
   fs.writeFileSync(destinationPath, normalizedBuffer);
 }
 
-async function loadReferenceImages(referenceImagePaths = [], manifestDir) {
+async function loadReferenceImages(referenceImagePaths = [], manifestDir, options = {}) {
   const referenceImages = [];
 
   for (const referenceImagePath of referenceImagePaths) {
     const resolvedPath = path.resolve(manifestDir, referenceImagePath);
     if (fs.existsSync(resolvedPath)) {
+      let buffer = fs.readFileSync(resolvedPath);
+      if (options.normalizeAspectRatio && options.aspectRatio) {
+        buffer = await padImageBufferToAspectRatio(buffer, {
+          aspectRatio: options.aspectRatio,
+          resolution: options.resolution,
+          outputFormat: 'png',
+        });
+      }
       referenceImages.push({
-        buffer: fs.readFileSync(resolvedPath),
+        buffer,
         filePath: resolvedPath,
       });
     }
@@ -135,15 +144,46 @@ async function loadReferenceImages(referenceImagePaths = [], manifestDir) {
   return referenceImages;
 }
 
+function addAspectHintToPrompt(prompt, aspectRatio) {
+  const text = String(prompt || '').trim();
+  if (!text || !aspectRatio) {
+    return text;
+  }
+
+  const lower = text.toLowerCase();
+  if (
+    lower.includes(String(aspectRatio).toLowerCase())
+    || lower.includes('vertical')
+    || lower.includes('portrait')
+    || lower.includes('landscape')
+    || lower.includes('horizontal')
+  ) {
+    return text;
+  }
+
+  const ratio = parseAspectRatio(aspectRatio);
+  const orientation = ratio.width <= ratio.height ? 'vertical portrait' : 'horizontal landscape';
+  return `Create this as a ${orientation} ${aspectRatio} composition. ${text}`;
+}
+
 async function generateFromPrompt(prompt, destinationPath, force = false, options = {}) {
   if (!force && fs.existsSync(destinationPath)) {
     return false;
   }
 
-  const referenceImages = await loadReferenceImages(options.referenceImagePaths || [], options.manifestDir || path.dirname(destinationPath));
+  const referenceImages = await loadReferenceImages(
+    options.referenceImagePaths || [],
+    options.manifestDir || path.dirname(destinationPath),
+    {
+      normalizeAspectRatio: options.normalizeReferenceAspectRatio,
+      aspectRatio: options.aspectRatio,
+      resolution: options.resolution,
+    }
+  );
+  const promptWithAspectHint = addAspectHintToPrompt(prompt, options.aspectRatio);
   const imageResult = await generateImage(
     { xaiApiKey: process.env.XAI_API_KEY },
-    prompt,
+    promptWithAspectHint,
     {
       model: IMAGE_MODELS.grok,
       outDir: path.dirname(destinationPath),
@@ -244,7 +284,8 @@ async function runStage(opts, stage) {
       allowLetterCharacters: job.allow_letter_characters,
       aspectRatio: renderSettings.aspect_ratio,
       resolution: renderSettings.resolution,
-      normalizeAspectRatio: stage === 'scene-frames',
+      normalizeAspectRatio: Boolean(renderSettings.aspect_ratio),
+      normalizeReferenceAspectRatio: Boolean(renderSettings.aspect_ratio),
     });
     if (changed) {
       generated += 1;

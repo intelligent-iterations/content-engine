@@ -15,15 +15,27 @@ import {
   downloadImage,
   IMAGE_MODELS,
   detectMimeTypeFromBuffer,
+  isBrowserOverrideEnabled,
   normalizeImageBufferForOutputPath,
   padImageBufferToAspectRatio,
 } from '../shared/generate-image.js';
+import {
+  assertSpendWithinLimit,
+  estimateXaiImageCost,
+  estimateXaiVideoCost,
+  recordApiSpend,
+} from '../shared/api-spend-tracker.js';
 
 const XAI_API_KEY = process.env.XAI_API_KEY;
 const BASE_URL = 'https://api.x.ai/v1';
 const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
+const DEFAULT_X_COOKIES_PATH = path.join(ROOT_DIR, 'cookies', 'x_cookies.json');
+
+function effectiveXaiApiKey() {
+  return isBrowserOverrideEnabled() ? null : XAI_API_KEY;
+}
 
 function normalizeImageModel(value) {
   const model = String(value || '').trim();
@@ -97,7 +109,8 @@ function resolveGrokWebSessionPath() {
     process.env.GROK_WEB_COOKIES_PATH,
     process.env.GROK_WEB_STATE_PATH,
     DEFAULT_GROK_STORAGE_PATH,
-    DEFAULT_GROK_COOKIES_PATH
+    DEFAULT_GROK_COOKIES_PATH,
+    DEFAULT_X_COOKIES_PATH
   ].filter(Boolean);
 
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
@@ -107,11 +120,14 @@ function buildGrokWebSessionArgs(sessionPath) {
   try {
     const raw = fs.readFileSync(sessionPath, 'utf8');
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) || Array.isArray(parsed?.cookies)) {
+    if (Array.isArray(parsed)) {
       return ['--cookies', sessionPath];
     }
     if (Array.isArray(parsed?.origins)) {
       return ['--state', sessionPath];
+    }
+    if (Array.isArray(parsed?.cookies)) {
+      return ['--cookies', sessionPath];
     }
   } catch {
     // Fall back to filename heuristics below.
@@ -228,6 +244,13 @@ async function prepareReferenceImageForVideo(referenceImagePath, options = {}) {
     outputFormat: 'png',
   });
   const normalizedBuffer = await normalizeImageBufferForOutputPath(paddedBuffer, preparedPath);
+
+  // If the scene frame is already the right portrait asset, reuse it directly
+  // instead of creating a redundant copy in prepared-video-refs.
+  if (Buffer.compare(sourceBuffer, normalizedBuffer) === 0) {
+    return referenceImagePath;
+  }
+
   fs.writeFileSync(preparedPath, normalizedBuffer);
 
   return preparedPath;
@@ -328,8 +351,9 @@ async function persistReferenceImageAsset(imageResult, outputPath) {
 }
 
 async function generateReferenceAsset(prompt, outputPath, options = {}) {
+  const apiKey = effectiveXaiApiKey();
   const result = await generateImageWithFallback(
-    { xaiApiKey: XAI_API_KEY },
+    { xaiApiKey: apiKey },
     prompt,
     {
       model: IMAGE_MODELS.grok,
@@ -342,7 +366,7 @@ async function generateReferenceAsset(prompt, outputPath, options = {}) {
   const localPath = await persistReferenceImageAsset(result, outputPath);
   return {
     localPath,
-    imageUrl: XAI_API_KEY ? result : null,
+    imageUrl: apiKey ? result : null,
   };
 }
 
@@ -528,15 +552,29 @@ export function parseCompilationMD(filePath) {
 
 // Step 1: Generate image from prompt
 export async function generateImage(prompt, clipName, options = {}) {
-  if (!XAI_API_KEY) {
+  const apiKey = effectiveXaiApiKey();
+  if (!apiKey) {
     throw new Error('Missing XAI_API_KEY in .env');
   }
 
   console.log(`  [image] Generating image for ${clipName}...`);
+  const model = normalizeImageModel(options.imageModel);
+  const estimatedCostUsd = estimateXaiImageCost({
+    model,
+    imageCount: 1,
+    inputImageCount: 0,
+  });
+
+  assertSpendWithinLimit({
+    provider: 'xai',
+    operation: 'images.generate',
+    model,
+    projectedCostUsd: estimatedCostUsd || 0,
+  });
 
   const res = await withRetry(
     () => api.post('/images/generations', {
-      model: normalizeImageModel(options.imageModel),
+      model,
       prompt,
       n: 1,
       response_format: 'url',
@@ -546,19 +584,50 @@ export async function generateImage(prompt, clipName, options = {}) {
   );
 
   const imageUrl = res.data.data[0].url;
+  recordApiSpend({
+    provider: 'xai',
+    operation: 'images.generate',
+    model,
+    costUsd: estimateXaiImageCost({
+      model,
+      imageCount: Number(res.data?.data?.length) || 1,
+      inputImageCount: 0,
+    }) || 0,
+    estimatedCostUsd,
+    metadata: {
+      clip_name: clipName,
+      aspect_ratio: options.aspectRatio || '9:16',
+      output_image_count: Number(res.data?.data?.length) || 1,
+    },
+  });
   console.log(`  [image] Got image URL for ${clipName}`);
   return imageUrl;
 }
 
 // Step 2: Generate video from image + prompt
 export async function generateVideo(imageUrl, prompt, options = {}) {
-  if (!XAI_API_KEY) {
+  const apiKey = effectiveXaiApiKey();
+  if (!apiKey) {
     throw new Error('Missing XAI_API_KEY in .env');
   }
+  const model = normalizeVideoModel(options.videoModel);
+  const estimatedCostUsd = estimateXaiVideoCost({
+    model,
+    durationSeconds: options.clipDurationSeconds || 6,
+    resolution: options.resolution || '720p',
+    inputImageCount: imageUrl ? 1 : 0,
+  });
+
+  assertSpendWithinLimit({
+    provider: 'xai',
+    operation: 'videos.generate',
+    model,
+    projectedCostUsd: estimatedCostUsd || 0,
+  });
 
   const res = await withRetry(
     () => api.post('/videos/generations', {
-      model: normalizeVideoModel(options.videoModel),
+      model,
       prompt,
       image: { url: imageUrl },
       duration: options.clipDurationSeconds || 6,
@@ -567,6 +636,26 @@ export async function generateVideo(imageUrl, prompt, options = {}) {
     }),
     { label: 'video:generate' }
   );
+
+  recordApiSpend({
+    provider: 'xai',
+    operation: 'videos.generate',
+    model,
+    costUsd: estimateXaiVideoCost({
+      model,
+      durationSeconds: options.clipDurationSeconds || 6,
+      resolution: options.resolution || '720p',
+      inputImageCount: imageUrl ? 1 : 0,
+    }) || 0,
+    estimatedCostUsd,
+    metadata: {
+      aspect_ratio: options.aspectRatio || '9:16',
+      duration_seconds: options.clipDurationSeconds || 6,
+      resolution: options.resolution || '720p',
+      request_id: res.data?.request_id || null,
+      used_input_image: Boolean(imageUrl),
+    },
+  });
 
   return res.data.request_id;
 }
@@ -624,7 +713,7 @@ export async function generateClip(clip, index, outputDir, options = {}) {
 
   console.log(`\n--- Clip ${clipNum}: ${clip.name} ---`);
 
-  if (!XAI_API_KEY) {
+  if (!effectiveXaiApiKey()) {
     const referenceStrategy = normalizeReferenceStrategy(options.referenceStrategy);
     let referenceImagePath = clip.sceneReferenceImagePath || options.sharedReferenceImagePath || null;
 

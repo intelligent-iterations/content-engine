@@ -50,14 +50,19 @@ Put your key in `.env`:
 
 ```bash
 XAI_API_KEY=your_xai_key
+XAI_SPEND_BUDGET_USD=25
+XAI_SPEND_CAP_USD=40
 ```
 
 This is the primary path for:
 
 - image generation
 - video generation where supported
+- Grok-written X captions when those posting flows use the API
 
 Carousel rendering does not use xAI text generation. It expects a saved research/content artifact created by Claude Code / Codex first, then uses Grok only for image generation.
+
+If you set `XAI_SPEND_BUDGET_USD`, the repo will warn when projected monthly spend crosses that budget. If you set `XAI_SPEND_CAP_USD`, the repo will block new billable xAI calls once the projected monthly spend would cross the cap. Spend logs are written to `output/tracking/api-spend-events.jsonl` and `output/tracking/api-spend-summary.json`.
 
 ### Option 2: Chrome cookie extraction
 
@@ -86,6 +91,11 @@ Saved Grok auth is read from:
 - `auth/grok-storage-state.json`
 
 If cookies expire, just re-run `npm run auth:grok` — it takes a few seconds.
+
+Important browser fallback note:
+
+- Saved Grok/X cookies are only enough if browser submit reaches a real generation job.
+- If Grok opens the `SuperGrok` subscribe modal instead of generating, browser rendering is blocked for that session and the repo should not treat Discover/gallery media as a valid result.
 
 ## Automated Posting Auth
 
@@ -139,9 +149,16 @@ Set up posting cookies:
 npm run auth:posting
 ```
 
+Inspect spend totals:
+
+```bash
+npm run spend:report
+```
+
 ## Summary
 
-- AI usage: either set `XAI_API_KEY` in `.env` or log into grok.com in Chrome and run `npm run auth:grok`
+- AI usage: either set `XAI_API_KEY` in `.env`, or provide `cookies/x_cookies.json` so the browser path can bootstrap `auth/grok-storage-state.json`, or log into grok.com in Chrome and run `npm run auth:grok`
+- Browser fallback still requires a session that can actually submit a generation job. If submit opens the `SuperGrok` subscribe modal, browser rendering is blocked for that session.
 - Automated posting: run the cookie setup script for each platform you want to post to
 - Saved videos go under `output/videos/<concept-slug>/`
 - Saved carousels go under `output/carousels/<concept-slug>/`

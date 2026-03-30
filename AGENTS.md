@@ -90,8 +90,9 @@ Before authoring prompts, assets, or render jobs:
 - Post captions in `<slug>_caption.txt` should be authored locally by the agent/local caption writer from saved repo state, not by Grok.
 - On-video dialogue captions should come from the rendered clip audio/transcription pipeline, with prompt dialogue used only as fallback alignment data.
 - If `XAI_API_KEY` is missing, stay template-first and render from saved artifacts rather than raw-topic browser prompting.
-- If `XAI_API_KEY` is missing but a saved Grok web session exists, agents should still run the browser-based generation path from the saved artifacts instead of stopping at prompt files.
-- Before declaring a video run blocked on missing `XAI_API_KEY`, check for browser-session fallbacks such as `auth/grok-session-cookies.json` or `auth/grok-storage-state.json`.
+- If `XAI_API_KEY` is missing but a saved Grok web session exists, agents should still try the browser-based generation path from the saved artifacts instead of stopping at prompt files.
+- Before declaring a video run blocked on missing `XAI_API_KEY`, check for browser-session fallbacks such as `auth/grok-session-cookies.json`, `auth/grok-storage-state.json`, or `cookies/x_cookies.json`.
+- Browser fallback is only valid if the Grok submit path starts a real generation job. If browser submit opens the `SuperGrok` subscribe modal instead, treat the run as browser-blocked and do not scrape Discover/gallery media as a fake result.
 - Caption nudge: carousel captions and reel/video captions should usually land between 2100 and 2200 characters, front-load the hook in the first 125 characters, stay SEO-friendly, and use the local caption-writing fallback rather than treating missing `XAI_API_KEY` as a caption blocker.
 - Posted-video default: queued videos should stay raw in `output/scheduled_videos/`, the standard promo clip from `/Users/admin/Documents/plug.mov` should be appended immediately before each platform post attempt, and the caption opener should be `Make videos like this by searching ii-content-engine on GitHub.`
 - For stitched multi-clip videos, continuity is a primary quality requirement, not a nice-to-have. Agents should optimize for a coherent script, stable character/world design, and visual consistency across clips before optimizing for novelty.
@@ -118,6 +119,8 @@ Before authoring prompts, assets, or render jobs:
 ## Grok Auth Flow
 
 If `XAI_API_KEY` is not set and no valid session exists at `auth/grok-storage-state.json`, the agent needs browser cookies to use Grok.
+If `cookies/x_cookies.json` exists, the browser path can bootstrap a fresh `auth/grok-storage-state.json` by completing the xAI `Login with 𝕏` flow in Playwright.
+Even with saved cookies, browser generation is not valid unless submit reaches a real Grok generation job rather than the `SuperGrok` subscribe modal.
 
 Before starting auth, the user should tell the agent which platform(s) they are already signed into and which Chrome profile email each one uses.
 

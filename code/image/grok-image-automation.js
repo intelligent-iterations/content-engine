@@ -12,6 +12,7 @@ import {
   makeTempChromeProfileDir,
   parseCookieFile
 } from '../shared/grok-browser-session.js';
+import { ensureAuthenticatedGrokSession } from '../shared/grok-web-auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -377,21 +378,6 @@ async function ensureImageMode(page, debug) {
   logDebug(debug, `Switched to Image mode; class=${nextClass || 'n/a'}`);
 }
 
-async function assertLoggedIn(page) {
-  const href = page.url();
-  if (/\/i\/flow\/login|\/login\b/i.test(href)) {
-    throw new Error('Not logged in to Grok. Save a storage state first with --save-login or provide valid cookies.');
-  }
-
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const lowered = bodyText.toLowerCase();
-  const hasLoginWall = lowered.includes('sign in to grok') || lowered.includes('log in to grok') || lowered.includes('continue with google');
-
-  if (hasLoginWall) {
-    throw new Error('Not logged in to Grok. Save a storage state first with --save-login or provide valid cookies.');
-  }
-}
-
 async function findVisiblePromptLocator(page) {
   const hydratedEditor = page.locator('[contenteditable="true"].ProseMirror').filter({ visible: true }).first();
   try {
@@ -565,8 +551,72 @@ async function submitPrompt(page, promptLocator, debug) {
 }
 
 async function detectErrorState(page) {
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const lowered = bodyText.toLowerCase();
+  const visibleDialogText = await page.evaluate(() => {
+    const selectors = [
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '[data-radix-dialog-content]',
+      '[data-state="open"][role="dialog"]'
+    ];
+
+    const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const texts = [];
+
+    for (const node of nodes) {
+      const text = (node.textContent || '').trim();
+      if (!text) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      texts.push(text);
+    }
+
+    return texts.join('\n');
+  }).catch(() => '');
+
+  const loweredDialog = visibleDialogText.toLowerCase();
+  if (
+    page.url().includes('#subscribe')
+    || (
+      loweredDialog.includes('supergrok')
+      && (
+        loweredDialog.includes('claim free offer')
+        || loweredDialog.includes('try free for 3 days')
+        || loweredDialog.includes('upgrade to lite')
+      )
+    )
+  ) {
+    return 'Grok browser submit opened the SuperGrok subscribe modal instead of starting image generation.';
+  }
+
+  const visibleErrorText = await page.evaluate(() => {
+    const selectors = [
+      '[role="alert"]',
+      '[role="status"]',
+      '[role="dialog"]',
+      '[data-sonner-toast]',
+      '[data-radix-toast-viewport]',
+      '[aria-live="assertive"]',
+      '[aria-live="polite"]'
+    ];
+
+    const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const texts = [];
+
+    for (const node of nodes) {
+      const text = (node.textContent || '').trim();
+      if (!text) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      texts.push(text);
+    }
+
+    return texts.join('\n');
+  }).catch(() => '');
+
+  const fallbackBodyText = visibleErrorText
+    ? visibleErrorText
+    : await page.locator('body').innerText().catch(() => '');
+  const lowered = fallbackBodyText.toLowerCase();
 
   if (lowered.includes('content moderated') || lowered.includes('try a different idea')) {
     return 'Grok rejected the prompt due to moderation';
@@ -580,23 +630,16 @@ async function detectErrorState(page) {
     return 'Grok reported a generation failure';
   }
 
-  const upsellPatterns = [
-    'upgrade to supergrok',
-    'upgrade to grok plus',
-    'subscribe to grok',
-    'supergrok plan',
-    'grok plus plan',
-    'unlock more',
-    'get more generations',
+  const hardLimitPatterns = [
     'generation limit reached',
-    'limit reached',
     'you\'ve reached your limit',
-    'upgrade your plan',
-    'upgrade now',
-    'go premium',
+    'you have reached your limit',
+    'get more generations',
+    'daily limit reached',
+    'monthly limit reached'
   ];
 
-  if (upsellPatterns.some((pattern) => lowered.includes(pattern))) {
+  if (hardLimitPatterns.some((pattern) => lowered.includes(pattern))) {
     return 'Grok free-tier limit reached (upgrade/subscription upsell detected). Use XAI_API_KEY or wait for the limit to reset.';
   }
 
@@ -703,6 +746,14 @@ async function collectKnownPublicAssetUrls(page) {
   });
 }
 
+async function collectKnownSectionIds(page) {
+  return page.evaluate(() => (
+    Array.from(document.querySelectorAll('[id^="imagine-masonry-section-"]'))
+      .map((node) => node.id)
+      .filter(Boolean)
+  ));
+}
+
 async function resolvePromptSection(page, prompt, debug, options = {}) {
   const allowFallback = options.allowFallback !== false;
   const target = normalizePromptText(prompt);
@@ -756,6 +807,7 @@ async function extractSectionImageMetadata(section) {
 
     return {
       currentUrl: location.href,
+      sectionId: node.id || '',
       metaUrls: [],
       imageUrls,
       downloadLinks
@@ -764,11 +816,10 @@ async function extractSectionImageMetadata(section) {
 }
 
 
-async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interceptedJobIds = [], prompt = '') {
+async function waitForGeneration(page, timeoutMs, debug, initialMetadata, knownSectionIds = [], interceptedJobIds = [], completedJobIds = [], prompt = '') {
   const deadline = Date.now() + timeoutMs;
   let sawProgress = false;
   const knownUrls = collectKnownMediaUrls(initialMetadata);
-  const knownPublicAssetUrls = new Set(await collectKnownPublicAssetUrls(page).catch(() => []));
 
   // Grok shows a compressed data URL preview (~31KB) on the main page.
   // The full-quality image is only on the /imagine/post/{jobId} page,
@@ -790,20 +841,13 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
       throw new Error(error);
     }
 
-    // PATH 1: Check for CDN public asset URLs (best quality)
-    const publicAssetUrls = await collectKnownPublicAssetUrls(page).catch(() => []);
-    const newPublicAssetUrl = publicAssetUrls.find((url) => !knownPublicAssetUrls.has(url)) || null;
-    if (newPublicAssetUrl) {
-      logDebug(debug, `Public asset CDN URL detected: ${newPublicAssetUrl}`);
-      return {
-        directUrl: newPublicAssetUrl,
-        metadata: await extractImageMetadata(page).catch(() => initialMetadata)
-      };
-    }
-
-    const promptSection = prompt
-      ? await resolvePromptSection(page, prompt, debug, { allowFallback: false }).catch(() => null)
-      : null;
+    const currentSectionIds = await collectKnownSectionIds(page).catch(() => []);
+    const newestSectionId = currentSectionIds.find((id) => !knownSectionIds.includes(id)) || null;
+    const promptSection = newestSectionId
+      ? page.locator(`#${newestSectionId}`).first()
+      : (prompt
+        ? await resolvePromptSection(page, prompt, debug, { allowFallback: false }).catch(() => null)
+        : null);
     const promptSectionMetadata = promptSection
       ? await extractSectionImageMetadata(promptSection).catch(() => null)
       : null;
@@ -842,39 +886,6 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
       }
     }
 
-    // PATH 2B: Accept new page-level HTTP assets, but never page-level data URLs.
-    const pageDirectUrl = chooseDirectImageUrl({
-      ...pageMetadata,
-      metaUrls: pageMetadata.metaUrls.filter((url) => !knownUrls.has(url)),
-      imageUrls: pageMetadata.imageUrls.filter((img) => !knownUrls.has(img.src)),
-      downloadLinks: pageMetadata.downloadLinks.filter((link) => !knownUrls.has(link.href))
-    });
-
-    if (pageDirectUrl && !/^data:image\//i.test(pageDirectUrl)) {
-      logDebug(debug, `Page-level HTTP image URL detected: ${pageDirectUrl}`);
-      return { directUrl: pageDirectUrl, metadata: pageMetadata };
-    }
-
-    // PATH 3: Check image selector candidates for HTTP URLs
-    for (const selector of IMAGE_SELECTOR_CANDIDATES) {
-      const image = page.locator(selector).filter({ visible: true }).first();
-      try {
-        if (await image.isVisible({ timeout: 500 })) {
-          const imgData = await image.evaluate((node) => ({
-            src: node.currentSrc || node.src || '',
-            width: node.naturalWidth || 0,
-            height: node.naturalHeight || 0
-          }));
-          if (imgData.src && !knownUrls.has(imgData.src) && /^https?:/i.test(imgData.src)) {
-            logDebug(debug, `Image element HTTP source detected: ${imgData.src} (${imgData.width}x${imgData.height})`);
-            return { directUrl: imgData.src, metadata };
-          }
-        }
-      } catch {
-        // Ignore and continue polling.
-      }
-    }
-
     // If preview detected but no job IDs yet, wait for WS to deliver them
     if (previewDetected && interceptedJobIds.length > 0) {
       logDebug(debug, 'Preview + job IDs ready — returning for post-page navigation');
@@ -883,8 +894,17 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
         ? chooseDirectImageUrl(promptSectionMetadata)
         : null;
       if (lastDirectUrl) {
-        return { directUrl: lastDirectUrl, metadata: lastMetadata };
+        return { directUrl: lastDirectUrl, metadata: lastMetadata, jobIds: [...interceptedJobIds] };
       }
+    }
+
+    if (completedJobIds.length > 0) {
+      logDebug(debug, `Completed image job detected via websocket: ${completedJobIds[0]}`);
+      return {
+        directUrl: null,
+        metadata: pageMetadata,
+        jobIds: [...completedJobIds],
+      };
     }
 
     const progressButton = page.locator('button[aria-label*="Options"]').first();
@@ -903,7 +923,7 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
 }
 
 async function downloadViaButton(page, outputPath, debug, options = {}) {
-  const section = await resolvePromptSection(page, options.prompt, debug).catch(() => null);
+  const section = await resolvePromptSection(page, options.prompt, debug, { allowFallback: false }).catch(() => null);
   if (!section) {
     return null;
   }
@@ -1070,7 +1090,7 @@ function inferImageExtension(url) {
 }
 
 async function runPrompt(args) {
-  const context = await launchPersistentChrome({ ...args, preferFreshProfile: !args.headed });
+  const context = await launchPersistentChrome(args);
   await applyCookiesToContext(context, args);
   const page = context.pages()[0] || await context.newPage();
 
@@ -1083,9 +1103,13 @@ async function runPrompt(args) {
     let attempt = 0;
     while (attempt <= args.maxRateLimitRetries) {
       await page.goto(GROK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await dismissInterruptions(page, args.debug);
+      await ensureAuthenticatedGrokSession(page, context, {
+        debug: args.debug,
+        statePath: args.statePath,
+      });
       await waitForEditorToHydrate(page, args.debug);
       await dismissInterruptions(page, args.debug);
-      await assertLoggedIn(page);
       await ensureImageMode(page, args.debug);
       await attachReferenceImages(page, args.referenceImagePaths, args.debug);
 
@@ -1101,8 +1125,10 @@ async function runPrompt(args) {
       // Grok Imagine uses WebSocket (wss://grok.com/ws/imagine/listen) for
       // generation. Completion frames contain CDN image URLs.
       const baselinePublicUrls = new Set(await collectKnownPublicAssetUrls(page).catch(() => []));
+      const baselineSectionIds = await collectKnownSectionIds(page).catch(() => []);
       const interceptedCdnUrls = [];
       const interceptedJobIds = [];
+      const completedJobIds = [];
 
       const cdpSession = await page.context().newCDPSession(page);
       await cdpSession.send('Network.enable');
@@ -1120,6 +1146,12 @@ async function runPrompt(args) {
           if (frame.job_id && !interceptedJobIds.includes(frame.job_id)) {
             interceptedJobIds.push(frame.job_id);
             logDebug(args.debug, `WS job: ${frame.job_id} status=${frame.current_status}`);
+          }
+
+          const status = String(frame.current_status || frame.status || '').toLowerCase();
+          if (frame.job_id && /(complete|completed|done|success|succeeded|finished|ready)/i.test(status) && !completedJobIds.includes(frame.job_id)) {
+            completedJobIds.push(frame.job_id);
+            logDebug(args.debug, `WS completed image job: ${frame.job_id} status=${status}`);
           }
 
           // Look for CDN URLs in any field
@@ -1167,12 +1199,12 @@ async function runPrompt(args) {
       await submitPrompt(page, promptInput, args.debug);
 
       try {
-        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata, interceptedJobIds, args.prompt);
+        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata, baselineSectionIds, interceptedJobIds, completedJobIds, args.prompt);
 
         // Try to upgrade from data URL preview to full-res CDN image.
         // The WS-intercepted /images/{jobId} CDN URLs are the exact generated
         // images. In-page fetch fails (CORS), but context.request bypasses CORS.
-        if (/^data:/.test(result.directUrl || '') && interceptedJobIds.length > 0) {
+        if ((!result.directUrl || /^data:/.test(result.directUrl || '')) && interceptedJobIds.length > 0) {
           // Wait a moment for remaining WS CDN URLs to arrive
           await page.waitForTimeout(5000);
 
