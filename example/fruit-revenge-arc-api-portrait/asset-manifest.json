@@ -1,0 +1,139 @@
+{
+  "topic": "Bullied orange serum revenge cafeteria drama with a sketchy banana dealer and a gorgeous cherry choosing him after the bullies mutate.",
+  "template_id": "anthropomorphic-fruit-revenge-drama",
+  "template_label": "Anthropomorphic Fruit Revenge Drama",
+  "render_settings": {
+    "clip_count": 5,
+    "clip_duration_seconds": 6,
+    "reference_strategy": "shared_reference",
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "image_model": "grok-imagine-image",
+    "video_model": "grok-imagine-video"
+  },
+  "asset_contract": {
+    "requires_character_assets": true,
+    "requires_scene_start_frames": true,
+    "requires_saved_run_artifacts": true
+  },
+  "cast_assets": [
+    {
+      "id": "wronged-lead",
+      "name": "Ozzie Orange",
+      "role": "wronged_lead",
+      "archetype_notes": "bullied underdog with noticeable rind bumps, shy at first, then thrilled by revenge and social reversal",
+      "suggested_types": [
+        "orange"
+      ],
+      "reference_image_paths": [],
+      "portrait_prompt": "Anthropomorphic orange teen underdog, premium cinematic 3D render, bright tangerine peel body with visible bumpy rind texture and a few darker pores that make him insecure, expressive brown eyes, worried mouth, and soft rounded cheeks. Slim awkward school-age silhouette with slightly hunched shoulders. Wearing a faded navy varsity jacket over a cafeteria uniform polo, dark jeans, scuffed white sneakers, and a green lunch card lanyard. Standing alone by school lockers with cafeteria light spilling across polished tile, clutching a dented lunch tray to his chest. Full-body eye-level shot, warm overhead school light, cool hallway fill, shallow depth of field, polished stylized 3D finish. Mood: embarrassed, lonely, secretly simmering. Palette: orange rind, navy, off-white, fluorescent teal accents.",
+      "reference_sheet_prompt": "Create a professional character turnaround sheet from this exact character only. Show full body front, side, back, and 3/4 views on a clean white studio background with even flat lighting. Preserve the exact same orange identity, bumpy rind texture, brown eyes, faded navy varsity jacket, cafeteria polo, dark jeans, white sneakers, green lunch card lanyard, awkward proportions, and polished 3D material finish. This is a derived continuity sheet, not a redesign.",
+      "portrait_output_path": "assets/cast/wronged-lead.png",
+      "reference_sheet_output_path": "assets/reference-sheets/wronged-lead.png"
+    },
+    {
+      "id": "target-of-revenge",
+      "name": "Lola Lemon",
+      "role": "target_of_revenge",
+      "archetype_notes": "glamorous bully queen who mocks Ozzie's rind and leads the cafeteria clique",
+      "suggested_types": [
+        "lemon"
+      ],
+      "reference_image_paths": [],
+      "portrait_prompt": "Anthropomorphic lemon bully queen, premium cinematic 3D render, glossy yellow lemon body with flawless lacquered peel, sharp cat-eye lashes, icy blue eyes, and a cruel amused smile. Sleek confident silhouette with one hip cocked and chin lifted. Wearing a cropped white cheer jacket, metallic gold pleated skirt, glossy white boots, layered charm bracelets, and a glitter phone case on a chain. Standing on a cafeteria table under bright skylight panels with her clique blurred behind her, one finger tapping her own perfect peel as if mocking flaws in others. Full-body low-angle shot, warm cafeteria skylight, cool bounce from polished floors, shallow depth of field, premium stylized 3D finish. Mood: gorgeous, vicious, untouchable. Palette: lemon yellow, white, metallic gold, cool blue highlights.",
+      "reference_sheet_prompt": "Create a professional character turnaround sheet from this exact character only. Show full body front, side, back, and 3/4 views on a clean white studio background with even flat lighting. Preserve the exact same lemon identity, icy blue eyes, cat-eye lashes, cropped white cheer jacket, metallic gold skirt, glossy white boots, bracelets, phone case chain, proportions, and polished 3D finish. This is a derived continuity sheet, not a redesign.",
+      "portrait_output_path": "assets/cast/target-of-revenge.png",
+      "reference_sheet_output_path": "assets/reference-sheets/target-of-revenge.png"
+    },
+    {
+      "id": "witness-or-ally",
+      "name": "Silas Banana",
+      "role": "witness_or_ally",
+      "archetype_notes": "sketchy serum dealer who enjoys the chaos more than morality",
+      "suggested_types": [
+        "banana"
+      ],
+      "reference_image_paths": [],
+      "portrait_prompt": "Anthropomorphic banana hustler, premium cinematic 3D render, curved ripe-banana body with slightly bruised peel edges, narrow green eyes, raised brow, and a crooked knowing grin. Lanky slippery silhouette with long limbs and relaxed shoulders. Wearing a cheap black faux-leather jacket over a dark hoodie, fingerless gloves, baggy cargo pants, beat-up sneakers, and a chain wallet with tiny vials clipped to it. Standing in a grimy alley behind the school cafeteria beside dumpsters and a buzzing service light, rolling a glowing neon-green serum vial between his fingers. Full-body medium-low shot, dirty sodium alley light mixed with green vial glow, shallow depth of field, polished stylized 3D finish. Mood: shady, amused, dangerous in a small-town way. Palette: bruised banana yellow, black, toxic green, dirty silver.",
+      "reference_sheet_prompt": "Create a professional character turnaround sheet from this exact character only. Show full body front, side, back, and 3/4 views on a clean white studio background with even flat lighting. Preserve the exact same banana identity, bruised peel edges, narrow green eyes, black faux-leather jacket, dark hoodie, fingerless gloves, cargo pants, beat-up sneakers, chain wallet, vial clips, proportions, and polished 3D finish. This is a derived continuity sheet, not a redesign.",
+      "portrait_output_path": "assets/cast/witness-or-ally.png",
+      "reference_sheet_output_path": "assets/reference-sheets/witness-or-ally.png"
+    },
+    {
+      "id": "cherry-love-interest",
+      "name": "Scarlet Cherry",
+      "role": "reward_love_interest",
+      "archetype_notes": "stunning cherry who watches the reversal and chooses Ozzie once the bullies collapse",
+      "suggested_types": [
+        "cherry"
+      ],
+      "reference_image_paths": [],
+      "portrait_prompt": "Anthropomorphic cherry beauty, premium cinematic 3D render, deep crimson cherry body with a glossy luxe finish, elegant twin stem curl like styled hair, large amber-brown eyes, glossy lips, and a calm magnetic expression. Curvy graceful silhouette with poised posture. Wearing a fitted black off-shoulder top, crimson satin mini skirt, sheer tights, tall black boots, and delicate gold earrings with a small silver heart charm necklace. Standing near the cafeteria windows with sunlight and fluorescent reflections catching her glossy surface, one hand loosely holding a closed red notebook at her side. Full-body eye-level shot, warm window light plus cool interior school fill, shallow depth of field, polished high-end 3D finish. Mood: gorgeous, selective, observant, quietly intrigued. Palette: deep cherry red, black, gold, soft silver highlights.",
+      "reference_sheet_prompt": "Create a professional character turnaround sheet from this exact character only. Show full body front, side, back, and 3/4 views on a clean white studio background with even flat lighting. Preserve the exact same cherry identity, amber-brown eyes, twin stem curl, black off-shoulder top, crimson satin mini skirt, tights, tall boots, earrings, heart charm necklace, proportions, and polished 3D finish. This is a derived continuity sheet, not a redesign.",
+      "portrait_output_path": "assets/cast/cherry-love-interest.png",
+      "reference_sheet_output_path": "assets/reference-sheets/cherry-love-interest.png"
+    }
+  ],
+  "scene_start_frames": [
+    {
+      "clip_index": 1,
+      "clip_name": "Bumpy Rind Bullying",
+      "source": "compilation_markdown",
+      "image_prompt": "Pixar-like anthropomorphic fruit revenge drama opening frame, premium cinematic 3D render, vertical 9:16. In a bright high-school cafeteria with glossy tile floors, skylight panels, fluorescent strips, chrome lunch tables, colorful juice posters, and crowded lunch trays, Lola Lemon stands on a bench leaning toward Ozzie Orange and mocking the bumpy pores on his rind while her polished clique laughs around her. Ozzie stands frozen with a dented lunch tray and flushed embarrassed eyes. Scarlet Cherry sits a few tables away by the windows, gorgeous and silent, noticing everything over the rim of a red notebook. Keep the exact same fruit identities, wardrobe, school environment, and polished stylized 3D finish. No text, no watermark.",
+      "reference_image_paths": [
+        "assets/reference-sheets/wronged-lead.png",
+        "assets/reference-sheets/target-of-revenge.png",
+        "assets/reference-sheets/cherry-love-interest.png"
+      ],
+      "output_path": "assets/scene-start-frames/clip01-bumpy-rind-bullying.png"
+    },
+    {
+      "clip_index": 2,
+      "clip_name": "Banana Alley Deal",
+      "source": "compilation_markdown",
+      "image_prompt": "Pixar-like anthropomorphic fruit revenge drama proof-and-deal frame, premium cinematic 3D render, vertical 9:16. In a grimy alley behind the school cafeteria with dumpsters, wet concrete, buzzing service lights, chain-link fence shadows, and steam from a kitchen vent, Ozzie Orange nervously hands crumpled cash to Silas Banana while Silas smirks and presents a glowing neon-green serum vial between fingerless gloved hands. Ozzie's lunch card lanyard and varsity jacket tie him clearly to the school world. Silas looks delighted by the chaos he is selling. Keep Ozzie and Silas exact to their locked designs with the same stylized 3D finish and no text or watermark.",
+      "reference_image_paths": [
+        "assets/reference-sheets/wronged-lead.png",
+        "assets/reference-sheets/witness-or-ally.png"
+      ],
+      "output_path": "assets/scene-start-frames/clip02-banana-alley-deal.png"
+    },
+    {
+      "clip_index": 3,
+      "clip_name": "Serum Tray Switch",
+      "source": "compilation_markdown",
+      "image_prompt": "Pixar-like anthropomorphic fruit revenge drama setup frame, premium cinematic 3D render, vertical 9:16. Back inside the cafeteria service line under bright fluorescent panels and stainless-steel sneeze guards, stage a literal two-tray swap in the foreground as the hero action. Ozzie Orange's hands must be the focal point: his left hand yanks the clean untouched tray backward while his right hand shoves the serum-loaded luxury tray forward into Lola Lemon's spot at the exact same instant. Keep both trays fully visible side by side so the switch reads in one glance. The treated tray must show obvious neon-green droplets and a faint toxic glow on the noodles and dessert cup, while the clean tray being removed is clearly plain and dry. Lola's glossy yellow hand with bracelets reaches for the swapped tray without noticing. Silas Banana watches from a shadowy service doorway with a pleased grin, and Scarlet Cherry notices from deeper in the lunchroom without interfering. Keep the same fruit identities, wardrobe, cafeteria props, and polished 3D continuity. No text, no watermark.",
+      "reference_image_paths": [
+        "assets/reference-sheets/wronged-lead.png",
+        "assets/reference-sheets/target-of-revenge.png",
+        "assets/reference-sheets/witness-or-ally.png",
+        "assets/reference-sheets/cherry-love-interest.png"
+      ],
+      "output_path": "assets/scene-start-frames/clip03-serum-tray-switch.png"
+    },
+    {
+      "clip_index": 4,
+      "clip_name": "Hideous Lunch Mutation",
+      "source": "compilation_markdown",
+      "image_prompt": "Pixar-like anthropomorphic fruit revenge drama shock payoff frame, premium cinematic 3D render, vertical 9:16. In the middle of the school cafeteria, catch the mutation at its ugliest mid-eruption moment, not before or after. Lola Lemon's glamorous face must be violently ruined: rind split open into asymmetrical blistered folds, one eye bulging wide while the other melts nearly shut, jaw twisted off-center, lashes glued together with neon slime, cheek blown outward, and torn peel seams leaking stringy pulp, fluorescent green foam, and cafeteria sludge down her white jacket and gold skirt. Her clique must look truly hideous too, transformed into swollen rotten fruit wrecks with warped mouths, ruptured peel patches, dripping mush, and collapsing glam. Trays flip overhead, green slime whips through the air, and students recoil in horror. Ozzie Orange stands nearby in stunned dark satisfaction, while Scarlet Cherry rises behind him with fresh interest. Keep it grotesque, shocking, and absurd while preserving the same polished stylized 3D school world, exact cast identities, wardrobe, and no text or watermark.",
+      "reference_image_paths": [
+        "assets/reference-sheets/wronged-lead.png",
+        "assets/reference-sheets/target-of-revenge.png",
+        "assets/reference-sheets/cherry-love-interest.png"
+      ],
+      "output_path": "assets/scene-start-frames/clip04-hideous-lunch-mutation.png"
+    },
+    {
+      "clip_index": 5,
+      "clip_name": "Cherry Chooses Orange",
+      "source": "compilation_markdown",
+      "image_prompt": "Pixar-like anthropomorphic fruit revenge drama status-flip ending frame, premium cinematic 3D render, vertical 9:16. In the cafeteria aftermath with trays overturned, green serum slime, stunned students, and the hideous mutated bullies collapsed in the blurry background, Scarlet Cherry strides straight past the ruined table and takes Ozzie Orange by the hand. Ozzie stands shocked and glowing with new confidence despite the same bumpy rind. Scarlet is gorgeous, poised, and completely uninterested in the former bullies. Silas Banana leans in a distant doorway smirking like he expected chaos. Bright cafeteria light, glossy tile reflections, red notebook on the table, and polished 3D finish keep the same world intact. Preserve exact fruit identities, wardrobe, proportions, and no text or watermark.",
+      "reference_image_paths": [
+        "assets/reference-sheets/wronged-lead.png",
+        "assets/reference-sheets/witness-or-ally.png",
+        "assets/reference-sheets/cherry-love-interest.png"
+      ],
+      "output_path": "assets/scene-start-frames/clip05-cherry-chooses-orange.png"
+    }
+  ]
+}

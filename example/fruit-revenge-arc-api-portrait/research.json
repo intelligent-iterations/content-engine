@@ -1,0 +1,303 @@
+{
+  "topic": "bullied orange serum revenge cafeteria drama",
+  "route": "local_agent_authored_md",
+  "template": {
+    "id": "anthropomorphic-fruit-revenge-drama",
+    "label": "Anthropomorphic Fruit Revenge Drama",
+    "description": "Continuity-sensitive five-beat fruit revenge short built from locked cast sheets, scene start frames, visible proof, absurd justice, and a cliffhanger-ready ending.",
+    "rule_profile": "general_story",
+    "prompting_profile": "grok_fruit_character_drama",
+    "caption_profile": "general_story",
+    "contract": {
+      "contract_version": 2,
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the fruit revenge concept, the triggering injustice, the absurd justice mechanism, and the cliffhanger payoff in 2-4 sentences. State why the cast contrast and revenge turn are legible at a glance on Shorts/Reels/TikTok.",
+          "required": true,
+          "min_words": 40
+        },
+        {
+          "title": "Fruit Cast Sheet",
+          "instruction": "List every recurring fruit character by fruit type, name, role, outfit, emotional energy, and locked visual details. Make the wronged lead, target, and any ally or witness instantly distinguishable.",
+          "required": true,
+          "min_words": 65
+        },
+        {
+          "title": "Justice Mechanic",
+          "instruction": "Explain the concrete revenge device, prop, or public reveal that makes the payoff absurd but satisfying. Keep it visual, simple, and safe for short-form viewing.",
+          "required": true,
+          "min_words": 40
+        },
+        {
+          "title": "Location Lock",
+          "instruction": "Name the recurring locations and specify the props, lighting logic, and color accents that should stay consistent across clips.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Specify which portrait assets, turnaround/reference sheets, and scene start frames must exist before rendering. Mention which scenes need multiple character references attached and which clip lands the cliffhanger.",
+          "required": true,
+          "min_words": 50
+        }
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "define the recurring fruit cast and the injustice that triggers the revenge",
+          "generate one portrait and one turnaround/reference sheet per recurring character",
+          "author a five-beat revenge markdown from saved repo state",
+          "generate one scene start frame per clip using cast references",
+          "animate each scene frame into a short clip with simple dialogue",
+          "stitch clips, burn captions, and save the final run artifacts"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card per clip with image-first continuity locking"
+      },
+      "tool_plan_contract": {
+        "asset_jobs": [
+          {
+            "id": "cast-portrait",
+            "stage": "cast",
+            "kind": "generate_image",
+            "source": "cast_assets",
+            "prompt_field": "portrait_prompt",
+            "output_field": "portrait_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "include_reference_siblings": true,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "cast-reference-sheet",
+            "stage": "cast",
+            "kind": "generate_image",
+            "source": "cast_assets",
+            "prompt_field": "reference_sheet_prompt",
+            "output_field": "reference_sheet_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "prepend_output_fields": [
+              "portrait_output_path"
+            ],
+            "reference_priority_patterns": [
+              "assets/cast/"
+            ],
+            "include_reference_siblings": true,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "cast-reference-sheet-match",
+            "stage": "cast",
+            "kind": "verify_reference_consistency",
+            "source": "cast_assets",
+            "subject_output_field": "reference_sheet_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "prepend_output_fields": [
+              "portrait_output_path"
+            ],
+            "reference_priority_patterns": [
+              "assets/cast/"
+            ],
+            "include_reference_siblings": true,
+            "rules": [
+              "Match the exact same fruit identity and face geometry as the approved hero portrait.",
+              "Do not redesign the character into a different fruit type, outfit, or silhouette.",
+              "Keep the same proportions, palette, material finish, and wardrobe while changing only the presentation into turnaround-sheet form."
+            ]
+          },
+          {
+            "id": "scene-start-frame",
+            "stage": "scene-frames",
+            "kind": "generate_image",
+            "source": "scene_start_frames",
+            "prompt_field": "image_prompt",
+            "output_field": "output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "reference_priority_patterns": [
+              "assets/reference-sheets/",
+              "assets/cast/"
+            ],
+            "include_reference_siblings": false,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "scene-start-frame-match",
+            "stage": "scene-frames",
+            "kind": "verify_reference_consistency",
+            "source": "scene_start_frames",
+            "subject_output_field": "output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "reference_priority_patterns": [
+              "assets/reference-sheets/",
+              "assets/cast/"
+            ],
+            "include_reference_siblings": false,
+            "rules_from_continuity_priority": true
+          }
+        ]
+      },
+      "video_execution_contract": {
+        "builder_version": 1,
+        "lines": {
+          "preamble": [
+            "Create a vertical 9:16 video clip.",
+            "Target duration: {{clip_duration_seconds}} seconds.",
+            "Treat the following image direction as the opening frame and visual identity to preserve.",
+            "Continuity is more important than novelty or extra detail.",
+            "If recurring characters are present, keep the exact same face/head design, silhouette, wardrobe logic, proportions, palette, environment, and cinematic style established by the image direction and continuity anchors.",
+            "Do not redesign characters into generic humans, new costumes, or a different art style.",
+            "If dialogue makes the acting feel weak, keep the acting simple and let the visual beat stay dominant."
+          ],
+          "image_direction_header": "IMAGE DIRECTION:",
+          "continuity_header": "CONTINUITY ANCHORS:",
+          "default_continuity_anchors": "Preserve the same identity, wardrobe, set, and overall style established by the image prompt.",
+          "motion_intro": "Animate that exact scene using this motion and dialogue direction:",
+          "video_direction_header": "VIDEO DIRECTION:",
+          "speaker_named": "Only {{speaker}} may deliver the spoken line in this clip.",
+          "speaker_none": "If a spoken line is present, keep it assigned to one clearly readable speaker.",
+          "speaker_lock_named": "Speaker lock: {{speaker}} is the only character allowed to produce audible speech, lip-sync, whisper words, narrate, or mouth the dialogue.",
+          "speaker_lock_none": "If no named speaker is provided, prefer no audible dialogue over assigning the line to the wrong character.",
+          "silent_characters_named": "{{silent_characters}} stay on-screen silent and must not mouth, lip-sync, whisper, narrate, or appear to say the line.",
+          "silent_characters_none": "Any other visible characters stay silent unless the prompt explicitly says otherwise.",
+          "dialogue_named": "Use exactly this spoken line: \"{{dialogue}}\"",
+          "dialogue_none": "Use no spoken dialogue unless the motion direction explicitly requires it.",
+          "wrong_speaker_failsafe_named": "If the line cannot be cleanly assigned to {{speaker}}, output no audible dialogue instead of giving the line to another character.",
+          "wrong_speaker_failsafe_none": "Do not let the wrong character deliver the line.",
+          "staging_named": "Keep staging and face visibility clear so {{speaker}} is the obvious readable source of the line when speech occurs.",
+          "staging_none": "Keep staging clear so any speaking source is visually unambiguous.",
+          "action_none": "Keep one dominant visible action.",
+          "ending": [
+            "Keep the framing, character, body-part context, and action clear and legible.",
+            "Output a single finished video clip."
+          ]
+        }
+      },
+      "asset_contract": {
+        "requires_character_assets": true,
+        "requires_scene_start_frames": true,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": true,
+        "requires_locked_wardrobe": true,
+        "requires_role_assignment": true,
+        "minimum_cast_size": 3,
+        "role_blueprint": [
+          {
+            "role": "wronged_lead",
+            "energy": "sympathetic, bruised but observant, then increasingly sharp and in control",
+            "good_picks": [
+              "cherry",
+              "peach",
+              "strawberry"
+            ]
+          },
+          {
+            "role": "target_of_revenge",
+            "energy": "smug, flashy, dismissive, ridiculous once exposed",
+            "good_picks": [
+              "lemon",
+              "lime",
+              "pear"
+            ]
+          },
+          {
+            "role": "witness_or_ally",
+            "energy": "grounded, useful, helps reveal the truth or trigger the payoff",
+            "good_picks": [
+              "orange",
+              "kiwi",
+              "apple"
+            ]
+          }
+        ]
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "wrong",
+          "proof",
+          "setup",
+          "justice",
+          "cliffhanger"
+        ],
+        "scene_prompt_strategy": "each clip should open from a continuity-locked scene frame, then animate one dominant revenge beat with clear staging, one named speaker at most, explicit silent-character control, a visible justice turn, and a final sting that invites the next episode"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "fruit identity",
+          "head geometry and facial features",
+          "wardrobe",
+          "body proportions",
+          "environment",
+          "color palette",
+          "lighting"
+        ]
+      }
+    }
+  },
+  "render_settings": {
+    "clip_count": 5,
+    "clip_duration_seconds": 6,
+    "target_length_seconds": 30,
+    "reference_strategy": "shared_reference",
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "image_model": "grok-imagine-image",
+    "video_model": "grok-imagine-video"
+  },
+  "grok_prompt_requirements": {
+    "image_prompt_word_range": {
+      "min": 70,
+      "max": 180
+    },
+    "video_prompt_word_range": {
+      "min": 35,
+      "max": 110
+    },
+    "fallback_video_prompt_word_range": {
+      "min": 25,
+      "max": 80
+    }
+  },
+  "distilled_template_guidance": {
+    "format_hint": "anthropomorphic fruit revenge story told as five tight cinematic beats with a locked fruit cast, visible injustice, satisfying payback, and a cliffhanger sting",
+    "ordering_strategy": "wrong, proof, setup, justice, cliffhanger",
+    "voice_direction": "absurd but emotionally clear, one named speaker per clip, explicit silent-character control, mobile-readable justice beats, one dominant action per scene, cliffhanger-ready ending",
+    "research_notes": [
+      "Lock the recurring fruit cast with one approved hero portrait and one derived reference sheet per main character before scene generation.",
+      "Keep fruit identity, facial geometry, wardrobe, body proportions, and color coding fixed across all clips.",
+      "Make the original wrongdoing and the revenge payoff visually legible through props, staging, and one clear turn per scene.",
+      "Use scene start frames with attached cast references whenever multiple fruit characters appear together.",
+      "Favor short dialogue and let the trap, reveal, or public humiliation carry the satisfaction.",
+      "Let the final beat land justice first, then add a cliffhanger sting that implies the world is not fully done escalating."
+    ],
+    "creative_direction": [
+      "Use polished stylized 3D fruit characters with premium rind texture, expressive cartoon-human eyes, strong silhouette contrast, and cinematic mobile-readable staging.",
+      "Make the wronged lead sympathetic at a glance and the target visibly smug, slippery, or ridiculous before the tables turn.",
+      "Keep revenge mechanisms absurd but concrete: giant dessert trap, humiliating juice spill, booby-trapped stage reveal, collapsing tower of lies, or a public fruit-market payoff that reads instantly on mobile.",
+      "Preserve one recurring hero location and one payoff location so the world feels stable while the justice escalates."
+    ],
+    "metaphor_examples": [],
+    "video_examples": [
+      "Clip 1 should show the humiliating wrong in one clear image beat.",
+      "Clip 3 should make the revenge setup visible before the justice lands.",
+      "Clip 5 should feel satisfying first, then end with a stinger that implies a bigger aftermath."
+    ],
+    "dialogue_examples": [
+      "\"You really thought I wouldn't notice?\"",
+      "\"Smile for everyone.\"",
+      "\"This is only part one.\""
+    ]
+  }
+}

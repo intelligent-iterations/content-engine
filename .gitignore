@@ -75,6 +75,7 @@ V3_SLIDESHOWS_POSTED.md
 *.mkv
 *.avi
 *.ass
+!example/**/*.mp4
 
 # Inspiration/reference content
 inspiration/

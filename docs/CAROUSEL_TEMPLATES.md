@@ -28,6 +28,27 @@ The current carousel renderer is artifact-driven. Template listing and default r
 
 Grok is only used for image generation in the carousel path. The agent is responsible for the thinking, structure, and saved artifact.
 
+## How To Do A Carousel
+
+The carousel workflow should feel exactly like the video workflow in one important way: the saved artifact is the source of truth.
+
+1. Choose or create a reusable carousel template.
+2. Save the run under `output/carousels/<slug>/`.
+3. Put the hook, slide plan, caption, and image prompts into the saved artifact.
+4. Render from that artifact, not from a one-off inline prompt.
+
+Videos need markdown, asset state, and plan JSON because they have more moving parts. Carousels are simpler. Most carousel runs can be fully described by one saved `research.json` file plus the rendered outputs beside it.
+
+## Example
+
+Example output:
+
+- Preview: [example/fufu-how-to-carousel/preview.html](../example/fufu-how-to-carousel/preview.html)
+- Research artifact: [example/fufu-how-to-carousel/research.json](../example/fufu-how-to-carousel/research.json)
+- Slides: [example/fufu-how-to-carousel](../example/fufu-how-to-carousel)
+
+This is the current tracked carousel showcase. It lives under `example/`, not `output/`, so the docs point at a real committed artifact instead of a gitignored runtime folder.
+
 ## Key Files
 
 - [prompts/carousel-templates.json](../prompts/carousel-templates.json)
@@ -46,6 +67,14 @@ Render a saved artifact:
 
 ```bash
 node code/cli/carousel.js --template comparison-list --research-file output/carousels/example-topic/research.json
+```
+
+Concrete example:
+
+```bash
+node code/cli/carousel.js \
+  --template how-to-tutorial \
+  --research-file example/fufu-how-to-carousel/research.json
 ```
 
 ## Artifact Shape
