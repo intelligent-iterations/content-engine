@@ -57,6 +57,7 @@ Example carousel:
 - **Videos** — short-form viral clips, multi-clip story arcs, promos, character pieces, ASMR-style content
 - **Carousels** — educational breakdowns, comparison lists, product showcases
 - **Auto-captioned assets** — post captions plus burned-in on-video dialogue captions for video workflows
+- **Cost tracking** — xAI spend logging, monthly budget warnings, and hard caps for API-backed generation and posting
 - **Scheduled posts** — queue approved content for TikTok, Instagram, and X
 
 ## Quick Start

@@ -149,6 +149,12 @@ Set up posting cookies:
 npm run auth:posting
 ```
 
+Build the local Docker images used by launchd/autopost:
+
+```bash
+npm run docker:build
+```
+
 Inspect spend totals:
 
 ```bash

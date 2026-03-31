@@ -33,7 +33,7 @@
     "post:x": "node code/posting/post-to-x.js",
     "autopost:x": "node code/posting/auto-post-x.js",
     "autopost:x:video": "node code/posting/auto-post-x-ai-video.js",
-    "docker:build": "docker compose build autopost",
+    "docker:build": "sh scripts/docker-build.sh",
     "docker:instagram:morning": "docker compose run --rm --no-deps autopost node code/posting/run-instagram-slot.js morning",
     "docker:instagram:midday": "docker compose run --rm --no-deps autopost node code/posting/run-instagram-slot.js midday",
     "docker:instagram:evening": "docker compose run --rm --no-deps autopost node code/posting/run-instagram-slot.js evening",

@@ -33,7 +33,7 @@ Each agent runs one slot-specific Docker command through [`scripts/docker-slot.s
 Before the schedulers can run, build the image once:
 
 ```bash
-docker compose build
+sh scripts/docker-build.sh
 ```
 
 ## Install
