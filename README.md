@@ -41,6 +41,13 @@ cp .env.example .env
 
 Optionally add your `XAI_API_KEY` to `.env`, or rely on browser-based Grok session reuse.
 
+If you use an xAI API key, you can also set a soft monthly budget and a hard monthly cap:
+
+```bash
+XAI_SPEND_BUDGET_USD=25
+XAI_SPEND_CAP_USD=40
+```
+
 Then open the repo in Claude Code or Codex and ask:
 
 ```text
@@ -72,6 +79,8 @@ The repo now also has a higher-level video workflow CLI for `prepare`, `render`,
 There are two separate auth tracks:
 
 **Grok (generation)** — works with `XAI_API_KEY` in `.env` or via browser cookies extracted from Chrome (`npm run auth:grok`). Generation works without an API key.
+
+When `XAI_API_KEY` is used, billable xAI calls are tracked under `output/tracking/`. Run `npm run spend:report` to inspect the current totals.
 
 **Platform posting** — requires saved cookies for each platform. Run `npm run auth:posting` (or platform-specific variants like `npm run auth:posting:tiktok`) to extract session cookies from Chrome.
 

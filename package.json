@@ -25,6 +25,7 @@
     "grok:login": "node code/cli/grok-video.js --save-login --headed",
     "grok:image": "node code/image/grok-image-automation.js",
     "grok:video": "node code/cli/grok-video.js",
+    "spend:report": "node code/cli/api-spend-report.js",
     "post:instagram": "node code/posting/post-to-instagram.js",
     "autopost:instagram": "node code/posting/auto-post-instagram.js",
     "autopost:instagram:video": "node code/posting/auto-post-instagram-ai-video.js",

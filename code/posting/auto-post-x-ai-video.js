@@ -23,11 +23,19 @@ import {
   updateScheduledPlatformPost,
 } from '../shared/scheduled-queue.js';
 import { buildShortPostWithPromo } from '../shared/post-promo.js';
+import {
+  assertSpendWithinLimit,
+  estimateXaiChatCompletionCost,
+  estimateXaiChatCompletionMaxCost,
+  extractXaiChatUsageMetadata,
+  recordApiSpend,
+} from '../shared/api-spend-tracker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, '..', '..');
 dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 const PLATFORM = 'x';
+const CHAT_MODEL = 'grok-4-1-fast-non-reasoning';
 
 const BROAD_HASHTAGS = ['#creators', '#marketing', '#video', '#content', '#automation'];
 const NICHE_HASHTAGS = ['#AIVideo', '#CarouselDesign', '#CreativeOps', '#ContentWorkflow', '#SocialContent'];
@@ -47,9 +55,7 @@ async function generateTweetCaption(video) {
   }
 
   try {
-    const res = await axios.post('https://api.x.ai/v1/chat/completions', {
-      model: 'grok-4-1-fast-non-reasoning',
-      messages: [{ role: 'user', content: `You write tweets for a general AI content tool that helps people generate videos and carousels fast.
+    const prompt = `You write tweets for a general AI content tool that helps people generate videos and carousels fast.
 
 CONTENT:
 Video topic: "${video.id}"
@@ -69,7 +75,24 @@ RULES:
 - No emojis, no links
 - Be direct, punchy, and highly shareable
 
-Return ONLY the tweet text. Nothing else.` }],
+Return ONLY the tweet text. Nothing else.`;
+    const messages = [{ role: 'user', content: prompt }];
+    const estimatedCostUsd = estimateXaiChatCompletionMaxCost({
+      model: CHAT_MODEL,
+      messages,
+      maxTokens: 200,
+    });
+
+    assertSpendWithinLimit({
+      provider: 'xai',
+      operation: 'chat.completions',
+      model: CHAT_MODEL,
+      projectedCostUsd: estimatedCostUsd || 0,
+    });
+
+    const res = await axios.post('https://api.x.ai/v1/chat/completions', {
+      model: CHAT_MODEL,
+      messages,
       max_tokens: 200,
       temperature: 0.9,
     }, {
@@ -81,6 +104,21 @@ Return ONLY the tweet text. Nothing else.` }],
 
     let tweet = res.data.choices?.[0]?.message?.content?.trim();
     if (tweet) {
+      recordApiSpend({
+        provider: 'xai',
+        operation: 'chat.completions',
+        model: CHAT_MODEL,
+        costUsd: estimateXaiChatCompletionCost({
+          model: CHAT_MODEL,
+          usage: res.data?.usage,
+        }) || 0,
+        estimatedCostUsd,
+        metadata: {
+          ...extractXaiChatUsageMetadata(res.data),
+          purpose: 'x-video-caption',
+        },
+      });
+
       tweet = tweet.replace(/^["']|["']$/g, '');
       if (tweet.length > 280) tweet = tweet.substring(0, 277) + '...';
       return tweet;
