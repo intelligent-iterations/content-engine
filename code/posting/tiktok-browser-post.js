@@ -33,6 +33,19 @@ let resolvedUsername = (process.env.TIKTOK_ACCOUNT_NAME || '').replace(/^@/, '')
 const CREATOR_UPLOAD_URL = 'https://www.tiktok.com/creator#/upload?scene=creator_center';
 const STUDIO_CONTENT_URL = 'https://www.tiktok.com/tiktokstudio/content';
 
+function chromiumLaunchOptions(headless) {
+  const executablePath = fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined;
+  return {
+    headless,
+    executablePath,
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+    ],
+    slowMo: headless ? 0 : 40,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Cookie helpers
 // ---------------------------------------------------------------------------
@@ -98,6 +111,59 @@ async function saveDebugScreenshot(page, label) {
   }
 }
 
+async function dismissTikTokOverlays(page) {
+  for (let dismissRound = 0; dismissRound < 4; dismissRound += 1) {
+    let dismissed = false;
+
+    for (const label of ['Turn on', 'Cancel', 'Got it', 'OK', 'Not now', 'Not Now', 'Skip', 'Close', 'Dismiss']) {
+      for (const getBtn of [
+        () => page.getByRole('button', { name: label }).first(),
+        () => page.locator(`button:has-text("${label}")`).first(),
+        () => page.locator(`div[role="button"]:has-text("${label}")`).first(),
+      ]) {
+        try {
+          const btn = getBtn();
+          if (await btn.isVisible({ timeout: 1000 })) {
+            await btn.click({ force: true });
+            console.log(`  [tiktok] Dismissed overlay: "${label}"`);
+            dismissed = true;
+            await page.waitForTimeout(1000);
+            break;
+          }
+        } catch { /* try next */ }
+      }
+      if (dismissed) break;
+    }
+
+    if (!dismissed) {
+      try {
+        const closeBtn = page.locator('.TUXModal-overlay button[aria-label="Close"], .TUXModal-overlay svg[data-icon="close"]').first();
+        if (await closeBtn.isVisible({ timeout: 1000 })) {
+          await closeBtn.click({ force: true });
+          console.log('  [tiktok] Dismissed overlay via close button');
+          dismissed = true;
+          await page.waitForTimeout(1000);
+        }
+      } catch { /* ignore */ }
+    }
+
+    const joyrideOverlay = page.locator('[data-test-id="overlay"], .react-joyride__overlay').first();
+    if (await joyrideOverlay.isVisible({ timeout: 1000 }).catch(() => false)) {
+      const gotIt = page.getByRole('button', { name: 'Got it' }).first();
+      if (await gotIt.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await gotIt.click({ force: true }).catch(() => {});
+        console.log('  [tiktok] Dismissed Joyride overlay via "Got it"');
+      } else {
+        await page.keyboard.press('Escape').catch(() => {});
+      }
+      dismissed = true;
+      await page.waitForTimeout(1000);
+    }
+
+    if (!dismissed) break;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Permalink extraction — click latest video on profile, verify caption match
 // ---------------------------------------------------------------------------
@@ -111,7 +177,7 @@ function captionFingerprint(caption) {
     .slice(0, 100);
 }
 
-async function extractPermalink(page, caption, maxRetries = 3) {
+async function extractPermalink(page, caption, maxRetries = 6) {
   const fingerprint = captionFingerprint(caption);
   console.log(`  [tiktok] Looking for post matching: "${fingerprint.slice(0, 60)}..."`);
 
@@ -120,30 +186,48 @@ async function extractPermalink(page, caption, maxRetries = 3) {
       // Use TikTok Studio content page — renders reliably (no CAPTCHA)
       console.log(`  [tiktok] Navigating to TikTok Studio content (attempt ${attempt})...`);
       await page.goto(STUDIO_CONTENT_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(6000);
+      await page.waitForTimeout(10000);
       await saveDebugScreenshot(page, `06a-studio-content-${attempt}`);
 
-      // Extract video URLs (with real username) from the content table HTML
+      // Extract video URLs plus row text from the Studio content table.
       const posts = await page.evaluate(() => {
-        const html = document.documentElement.innerHTML;
-        const results = [];
         const seen = new Set();
+        const anchors = Array.from(document.querySelectorAll('a[href*="/video/"]'));
+        const results = [];
 
-        // Extract @username/video/ID patterns — gets real username from links
+        for (const anchor of anchors) {
+          const href = anchor.getAttribute('href') || '';
+          const match = href.match(/@([a-zA-Z0-9_.]+)\/video\/(\d+)/);
+          if (!match || seen.has(match[2])) continue;
+          seen.add(match[2]);
+          const row = anchor.closest('tr, [role="row"], li, .matrix-item, .content-item') || anchor.parentElement;
+          results.push({
+            id: match[2],
+            username: match[1],
+            url: `https://www.tiktok.com/@${match[1]}/video/${match[2]}`,
+            rowText: (row?.innerText || anchor.innerText || '').trim(),
+          });
+        }
+
+        if (results.length > 0) return results.slice(0, 10);
+
+        // Fallback to regex against full HTML if anchors were not enough.
+        const html = document.documentElement.innerHTML;
+        const fallback = [];
         const re = /@([a-zA-Z0-9_.]+)\/video\/(\d+)/g;
         let m;
         while ((m = re.exec(html)) !== null) {
           if (!seen.has(m[2])) {
             seen.add(m[2]);
-            results.push({
+            fallback.push({
               id: m[2],
               username: m[1],
               url: `https://www.tiktok.com/@${m[1]}/video/${m[2]}`,
+              rowText: '',
             });
           }
         }
-
-        return results.slice(0, 10);
+        return fallback.slice(0, 10);
       });
 
       console.log(`  [tiktok] Found ${posts.length} posts in Studio`);
@@ -151,7 +235,7 @@ async function extractPermalink(page, caption, maxRetries = 3) {
       if (posts.length === 0) {
         console.log('  [tiktok] No posts found in Studio content page');
         if (attempt < maxRetries) {
-          await page.waitForTimeout(10000);
+          await page.waitForTimeout(15000);
           continue;
         }
         return null;
@@ -164,13 +248,20 @@ async function extractPermalink(page, caption, maxRetries = 3) {
         console.log(`  [tiktok] Resolved username from Studio: @${resolvedUsername}`);
       }
       console.log(`  [tiktok] Latest video: ${latestPost.url}`);
-      if (latestPost.caption) {
-        console.log(`  [tiktok] Studio caption: "${latestPost.caption.slice(0, 80)}"`);
+      if (latestPost.rowText) {
+        console.log(`  [tiktok] Studio row: "${latestPost.rowText.slice(0, 120)}"`);
       }
 
       // If no caption to verify, return the latest post
       if (!fingerprint) {
         console.log('  [tiktok] No caption to verify — returning latest post');
+        return latestPost.url;
+      }
+
+      const rowFp = captionFingerprint(latestPost.rowText || '');
+      if (rowFp.length >= 10 &&
+          (rowFp.includes(fingerprint.slice(0, 40)) || fingerprint.includes(rowFp.slice(0, 40)))) {
+        console.log(`  [tiktok] Caption match confirmed from Studio row: ${latestPost.url}`);
         return latestPost.url;
       }
 
@@ -196,13 +287,13 @@ async function extractPermalink(page, caption, maxRetries = 3) {
 
       console.log(`  [tiktok] Caption mismatch: "${pageFp.slice(0, 60)}"`);
       if (attempt < maxRetries) {
-        console.log('  [tiktok] Video may not have propagated yet, retrying in 15s...');
-        await page.waitForTimeout(15000);
+        console.log('  [tiktok] Video may not have propagated yet, retrying in 20s...');
+        await page.waitForTimeout(20000);
       }
     } catch (e) {
       console.log(`  [tiktok] Permalink extraction error (attempt ${attempt}): ${e.message}`);
       if (attempt < maxRetries) {
-        await page.waitForTimeout(10000);
+        await page.waitForTimeout(15000);
       }
     }
   }
@@ -259,14 +350,7 @@ export async function postToTikTok({ videoPath, caption = '', headless = true })
     // -----------------------------------------------------------------------
     // 1. Launch browser with anti-bot stealth
     // -----------------------------------------------------------------------
-    browser = await chromium.launch({
-      headless,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-      ],
-      slowMo: headless ? 0 : 40,
-    });
+    browser = await chromium.launch(chromiumLaunchOptions(headless));
 
     context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -404,43 +488,7 @@ export async function postToTikTok({ videoPath, caption = '', headless = true })
     // 7b. Dismiss any modal overlays that appeared after upload
     //     (e.g. "Turn on automatic content checks?", "Got it" tooltips)
     // -----------------------------------------------------------------------
-    for (let dismissRound = 0; dismissRound < 3; dismissRound++) {
-      let dismissed = false;
-      for (const label of ['Turn on', 'Cancel', 'Got it', 'OK', 'Not now', 'Not Now', 'Skip', 'Close', 'Dismiss']) {
-        for (const getBtn of [
-          () => page.getByRole('button', { name: label }).first(),
-          () => page.locator(`button:has-text("${label}")`).first(),
-          () => page.locator(`div[role="button"]:has-text("${label}")`).first(),
-        ]) {
-          try {
-            const btn = getBtn();
-            if (await btn.isVisible({ timeout: 1500 })) {
-              await btn.click({ force: true });
-              console.log(`  [tiktok] Dismissed overlay: "${label}"`);
-              dismissed = true;
-              await page.waitForTimeout(1500);
-              break;
-            }
-          } catch { /* try next */ }
-        }
-        if (dismissed) break;
-      }
-
-      // Also try clicking the X/close button on any TUXModal
-      if (!dismissed) {
-        try {
-          const closeBtn = page.locator('.TUXModal-overlay button[aria-label="Close"], .TUXModal-overlay svg[data-icon="close"]').first();
-          if (await closeBtn.isVisible({ timeout: 1000 })) {
-            await closeBtn.click({ force: true });
-            console.log('  [tiktok] Dismissed overlay via close button');
-            dismissed = true;
-            await page.waitForTimeout(1500);
-          }
-        } catch { /* ignore */ }
-      }
-
-      if (!dismissed) break; // No more overlays to dismiss
-    }
+    await dismissTikTokOverlays(page);
 
     await saveDebugScreenshot(page, '03b-after-dismiss');
 
@@ -449,6 +497,7 @@ export async function postToTikTok({ videoPath, caption = '', headless = true })
     // -----------------------------------------------------------------------
     if (caption) {
       console.log('  [tiktok] Filling caption...');
+      await dismissTikTokOverlays(page);
 
       // TikTok uses DraftJS which doesn't work with Playwright's fill().
       // We need to click the editor, select all existing text, then type.
@@ -510,6 +559,7 @@ export async function postToTikTok({ videoPath, caption = '', headless = true })
     //    ignores synthetic JS dispatchEvent)
     // -----------------------------------------------------------------------
     console.log('  [tiktok] Clicking Post button...');
+    await dismissTikTokOverlays(page);
 
     // Exact approach from the first successful run: getByRole .first() + plain .click()
     // Playwright auto-scrolls. No force, no manual scroll.
@@ -553,8 +603,8 @@ export async function postToTikTok({ videoPath, caption = '', headless = true })
     // 11. Wait ~30s, then go to profile and click the latest video to get
     //     the permalink. Verify the caption matches.
     // -----------------------------------------------------------------------
-    console.log('  [tiktok] Waiting 30s for video to propagate...');
-    await page.waitForTimeout(30000);
+    console.log('  [tiktok] Waiting 90s for video to propagate...');
+    await page.waitForTimeout(90000);
 
     const permalink = await extractPermalink(page, caption);
     if (!permalink) {

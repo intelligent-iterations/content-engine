@@ -1,0 +1,121 @@
+{
+  "topic": "How to make fufu at home",
+  "hook": "Here’s how to make fufu",
+  "caption": "Fufu tutorial: here’s a simple way to make it at home with cassava as the base. Green plantain is optional. Peel, blend, cook, then stir until smooth and stretchy. Save this before your next cook day.",
+  "hashtags": [
+    "fufu",
+    "foodtutorial",
+    "westafricanfood",
+    "homecooking",
+    "pomapp"
+  ],
+  "template_id": "fufu-how-to",
+  "template_label": "How To Make Fufu",
+  "template_slide_count": 7,
+  "template_pair_count": 1,
+  "research_artifact_path": "/Users/admin/content-gen/carousels/fufu-how-to/research.json",
+  "research_context": {
+    "topic": "How to make fufu at home",
+    "template_id": "fufu-how-to",
+    "summary": [
+      "For a home-cook tutorial, cassava is the clearest base ingredient to anchor the process.",
+      "Several recipe guides note that green plantain can be added, but cassava should stay the lead ingredient in a simple explainer.",
+      "The most reusable visual process is peel, remove the fibrous core, chop, blend with water, then cook and stir until smooth and stretchy.",
+      "A practical texture cue matters: the mixture should be soft, smooth, and slightly stretchy because it firms up as it cools.",
+      "For carousel performance, the strongest format is a promise-first hook, one distinct idea per slide, a clear final result shot, and a save-forward closing slide."
+    ],
+    "sources": [
+      {
+        "label": "Chef Lola's Kitchen - Fufu Recipe (How To Make Fufu)",
+        "url": "https://cheflolaskitchen.com/fufu-recipe-how-to-make-fufu/"
+      },
+      {
+        "label": "Cup of Yum - Easy Fufu Recipe",
+        "url": "https://cupofyum.com/recipes/easy-fufu-recipe-1"
+      },
+      {
+        "label": "SocialGummy - Social Media Carousel Posts: The Ultimate Guide to Creating Viral Slides in 2025",
+        "url": "https://www.socialgummy.com/blog/social-media-carousel-posts-ultimate-guide-2025"
+      }
+    ],
+    "format_notes": [
+      "Keep the slide sequence in strict tutorial order.",
+      "Show one visual action per instructional slide.",
+      "Use short sentence-case overlays with no more than one task cue per card.",
+      "End with either a save CTA or one practical serving tip."
+    ]
+  },
+  "slides": [
+    {
+      "slide_number": 1,
+      "slide_type": "hook",
+      "product_name": null,
+      "image_source": "ai",
+      "image_prompt": "realistic home kitchen food photo of a smooth rounded ball of fufu in a simple bowl beside a rich soup, natural daylight, appetizing, close-up, soft neutral kitchen background, no text",
+      "text_overlay": "Here’s how to make fufu",
+      "text_position": "top",
+      "score": null
+    },
+    {
+      "slide_number": 2,
+      "slide_type": "ingredients",
+      "product_name": null,
+      "image_source": "ai",
+      "image_prompt": "realistic overhead kitchen prep scene with peeled cassava pieces in a bowl, a whole green plantain off to the side as an optional extra, small bowl of water, clean home counter, no text",
+      "text_overlay": "Cassava first, plantain optional",
+      "text_position": "top",
+      "score": null
+    },
+    {
+      "slide_number": 3,
+      "slide_type": "tutorial_step",
+      "product_name": null,
+      "image_source": "ai",
+      "image_prompt": "realistic close-up of hands peeling cassava, slicing it open, and removing the fibrous center on a cutting board in a home kitchen, natural light, no text",
+      "text_overlay": "Peel, core, and chop",
+      "text_position": "top",
+      "score": null
+    },
+    {
+      "slide_number": 4,
+      "slide_type": "tutorial_step",
+      "product_name": null,
+      "image_source": "ai",
+      "image_prompt": "realistic blender on a kitchen counter with chopped cassava and water being blended into a smooth pale mixture, hands visible, home kitchen, no text",
+      "text_overlay": "Blend with a little water",
+      "text_position": "top",
+      "score": null
+    },
+    {
+      "slide_number": 5,
+      "slide_type": "tutorial_step",
+      "product_name": null,
+      "image_source": "ai",
+      "image_prompt": "realistic pot on a stovetop with thick cassava mixture being stirred vigorously with a wooden spoon until smooth and stretchy, home kitchen, steam, no text",
+      "text_overlay": "Cook and stir until stretchy",
+      "text_position": "top",
+      "score": null
+    },
+    {
+      "slide_number": 6,
+      "slide_type": "final_result",
+      "product_name": null,
+      "image_source": "ai",
+      "image_prompt": "realistic hands shaping soft warm fufu into a smooth round mound and serving it in a bowl beside soup, appetizing home meal presentation, natural light, no text",
+      "text_overlay": "Shape and serve warm",
+      "text_position": "top",
+      "score": null
+    },
+    {
+      "slide_number": 7,
+      "slide_type": "cta",
+      "product_name": null,
+      "image_source": "ai",
+      "image_prompt": "clean realistic kitchen counter with finished fufu and soup softly blurred in the background, bright natural light, minimal food styling, no text",
+      "text_overlay": "Save this for cook day",
+      "text_position": "center",
+      "score": null
+    }
+  ],
+  "generated_at": "2026-03-22T19:10:38.007Z"
+}

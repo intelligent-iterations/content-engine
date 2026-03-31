@@ -11,6 +11,7 @@ import {
   isChromeProfileLockError,
   makeTempChromeProfileDir
 } from '../shared/grok-browser-session.js';
+import { ensureAuthenticatedGrokSession } from '../shared/grok-web-auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -202,6 +203,31 @@ function resolveCookiePath(providedPath) {
   return DEFAULT_COOKIE_PATH_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
+function resolvePlaywrightLaunchOptions(args) {
+  const launchOptions = {
+    headless: !args.headed,
+    acceptDownloads: true,
+    downloadsPath: args.outDir,
+    viewport: { width: 1440, height: 1080 },
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  };
+
+  const executableCandidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser'
+  ].filter(Boolean);
+
+  const executablePath = executableCandidates.find((candidate) => fs.existsSync(candidate));
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  } else {
+    launchOptions.channel = 'chrome';
+  }
+
+  return launchOptions;
+}
+
 async function buildContext(browser, args) {
   const contextOptions = {
     acceptDownloads: true,
@@ -228,14 +254,7 @@ async function applyCookiesToContext(context, args) {
 async function launchPersistentChrome(args) {
   ensureDir(args.userDataDir);
   ensureDir(args.outDir);
-  const launchOptions = {
-    headless: !args.headed,
-    channel: 'chrome',
-    acceptDownloads: true,
-    downloadsPath: args.outDir,
-    viewport: { width: 1440, height: 1080 },
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-  };
+  const launchOptions = resolvePlaywrightLaunchOptions(args);
 
   try {
     return await chromium.launchPersistentContext(args.userDataDir, launchOptions);
@@ -378,21 +397,6 @@ async function ensureVideoDuration(page, durationSeconds, debug) {
   }, label, { timeout: 5000 });
 
   logDebug(debug, `Switched video duration to ${label}`);
-}
-
-async function assertLoggedIn(page) {
-  const href = page.url();
-  if (/\/i\/flow\/login|\/login\b/i.test(href)) {
-    throw new Error('Not logged in to Grok. Save a storage state first with --save-login or provide valid cookies.');
-  }
-
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const lowered = bodyText.toLowerCase();
-  const hasLoginWall = lowered.includes('sign in to grok') || lowered.includes('log in to grok') || lowered.includes('continue with google');
-
-  if (hasLoginWall) {
-    throw new Error('Not logged in to Grok. Save a storage state first with --save-login or provide valid cookies.');
-  }
 }
 
 async function findVisiblePromptLocator(page) {
@@ -563,8 +567,72 @@ async function submitPrompt(page, promptLocator, debug) {
 }
 
 async function detectErrorState(page) {
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const lowered = bodyText.toLowerCase();
+  const visibleDialogText = await page.evaluate(() => {
+    const selectors = [
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '[data-radix-dialog-content]',
+      '[data-state="open"][role="dialog"]'
+    ];
+
+    const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const texts = [];
+
+    for (const node of nodes) {
+      const text = (node.textContent || '').trim();
+      if (!text) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      texts.push(text);
+    }
+
+    return texts.join('\n');
+  }).catch(() => '');
+
+  const loweredDialog = visibleDialogText.toLowerCase();
+  if (
+    page.url().includes('#subscribe')
+    || (
+      loweredDialog.includes('supergrok')
+      && (
+        loweredDialog.includes('claim free offer')
+        || loweredDialog.includes('try free for 3 days')
+        || loweredDialog.includes('upgrade to lite')
+      )
+    )
+  ) {
+    return 'Grok browser submit opened the SuperGrok subscribe modal instead of starting video generation.';
+  }
+
+  const visibleErrorText = await page.evaluate(() => {
+    const selectors = [
+      '[role="alert"]',
+      '[role="status"]',
+      '[role="dialog"]',
+      '[data-sonner-toast]',
+      '[data-radix-toast-viewport]',
+      '[aria-live="assertive"]',
+      '[aria-live="polite"]'
+    ];
+
+    const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const texts = [];
+
+    for (const node of nodes) {
+      const text = (node.textContent || '').trim();
+      if (!text) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      texts.push(text);
+    }
+
+    return texts.join('\n');
+  }).catch(() => '');
+
+  const fallbackBodyText = visibleErrorText
+    ? visibleErrorText
+    : await page.locator('body').innerText().catch(() => '');
+  const lowered = fallbackBodyText.toLowerCase();
 
   if (lowered.includes('content moderated') || lowered.includes('try a different idea')) {
     return 'Grok rejected the prompt due to moderation';
@@ -578,23 +646,16 @@ async function detectErrorState(page) {
     return 'Grok reported a generation failure';
   }
 
-  const upsellPatterns = [
-    'upgrade to supergrok',
-    'upgrade to grok plus',
-    'subscribe to grok',
-    'supergrok plan',
-    'grok plus plan',
-    'unlock more',
-    'get more generations',
+  const hardLimitPatterns = [
     'generation limit reached',
-    'limit reached',
     'you\'ve reached your limit',
-    'upgrade your plan',
-    'upgrade now',
-    'go premium',
+    'you have reached your limit',
+    'get more generations',
+    'daily limit reached',
+    'monthly limit reached'
   ];
 
-  if (upsellPatterns.some((pattern) => lowered.includes(pattern))) {
+  if (hardLimitPatterns.some((pattern) => lowered.includes(pattern))) {
     return 'Grok free-tier limit reached (upgrade/subscription upsell detected). Use XAI_API_KEY or wait for the limit to reset.';
   }
 
@@ -644,6 +705,10 @@ async function extractVideoMetadata(page) {
   });
 }
 
+function normalizeCompletionStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function chooseDirectVideoUrl(metadata) {
   const preferred = [
     ...metadata.downloadLinks
@@ -664,7 +729,7 @@ function collectKnownMediaUrls(metadata) {
   ].filter(Boolean));
 }
 
-async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
+async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interceptedJobIds = [], completedJobIds = []) {
   const deadline = Date.now() + timeoutMs;
   let sawProgress = false;
   const knownUrls = collectKnownMediaUrls(initialMetadata);
@@ -687,7 +752,7 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
 
     if (directUrl) {
       logDebug(debug, `Direct video URL detected: ${directUrl}`);
-      return { directUrl, metadata };
+      return { directUrl, metadata, jobIds: [...interceptedJobIds] };
     }
 
     for (const selector of VIDEO_SELECTOR_CANDIDATES) {
@@ -697,7 +762,7 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
           const currentSrc = await video.evaluate((node) => node.currentSrc || node.src || '');
           if (currentSrc && !knownUrls.has(currentSrc)) {
             logDebug(debug, `Video element source detected: ${currentSrc}`);
-            return { directUrl: currentSrc, metadata };
+            return { directUrl: currentSrc, metadata, jobIds: [...interceptedJobIds] };
           }
         }
       } catch {
@@ -718,6 +783,15 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata) {
 
     if (metadata.currentUrl.includes('/imagine/post/')) {
       logDebug(debug, `On imagine post route: ${metadata.currentUrl}`);
+    }
+
+    if (completedJobIds.length > 0) {
+      logDebug(debug, `Completed video job detected via websocket: ${completedJobIds[0]}`);
+      return {
+        directUrl: null,
+        metadata,
+        jobIds: [...completedJobIds],
+      };
     }
 
     await page.waitForTimeout(sawProgress ? 2500 : 1500);
@@ -758,15 +832,72 @@ async function downloadViaBrowserNavigation(context, url, outputPath, debug) {
   const page = await context.newPage();
 
   try {
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 15000 }),
-      page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null)
+    const response = await page.goto(url, { waitUntil: 'commit', timeout: 15000 }).catch(() => null);
+    if (response?.ok()) {
+      fs.writeFileSync(outputPath, Buffer.from(await response.body()));
+      return outputPath;
+    }
+
+    const mediaResponse = await page.waitForResponse(
+      (candidate) => candidate.url() === url && candidate.status() === 200,
+      { timeout: 8000 }
+    ).catch(() => null);
+    if (mediaResponse) {
+      fs.writeFileSync(outputPath, Buffer.from(await mediaResponse.body()));
+      return outputPath;
+    }
+
+    await page.setContent('<html><body></body></html>').catch(() => {});
+    const downloadPromise = page.waitForEvent('download', { timeout: 10000 }).catch(() => null);
+    await page.evaluate((assetUrl) => {
+      const anchor = document.createElement('a');
+      anchor.href = assetUrl;
+      anchor.download = 'grok-video.mp4';
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    }, url).catch(() => {});
+
+    const download = await downloadPromise;
+    if (download) {
+      await download.saveAs(outputPath);
+      return outputPath;
+    }
+
+    const fetched = await Promise.race([
+      page.evaluate(async () => {
+        try {
+          const res = await fetch(window.location.href, { credentials: 'include' });
+          if (!res.ok) {
+            return { ok: false, status: res.status };
+          }
+          const bytes = Array.from(new Uint8Array(await (await res.blob()).arrayBuffer()));
+          return { ok: true, bytes };
+        } catch (error) {
+          return {
+            ok: false,
+            status: -1,
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+      }),
+      new Promise((resolve) => setTimeout(() => resolve({
+        ok: false,
+        status: -2,
+        error: 'browser navigation fetch timeout'
+      }), 8000))
     ]);
-    await download.saveAs(outputPath);
-    return outputPath;
+
+    if (fetched.ok) {
+      fs.writeFileSync(outputPath, Buffer.from(fetched.bytes));
+      return outputPath;
+    }
   } finally {
     await page.close().catch(() => {});
   }
+
+  return null;
 }
 
 async function downloadFromUrl(context, page, url, outputPath, debug) {
@@ -829,9 +960,13 @@ async function runPrompt(args) {
 
   try {
     await page.goto(GROK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await dismissInterruptions(page, args.debug);
+    await ensureAuthenticatedGrokSession(page, context, {
+      debug: args.debug,
+      statePath: args.statePath,
+    });
     await waitForEditorToHydrate(page, args.debug);
     await dismissInterruptions(page, args.debug);
-    await assertLoggedIn(page);
     await ensureVideoMode(page, args.debug);
     await ensureVideoDuration(page, args.durationSeconds, args.debug);
     await attachReferenceImage(page, args.referenceImagePath, args.debug);
@@ -843,6 +978,69 @@ async function runPrompt(args) {
       return submit && !submit.disabled;
     }, { timeout: 15000 }).catch(() => {});
     const initialMetadata = await extractVideoMetadata(page);
+
+    const interceptedAssetUrls = [];
+    const interceptedJobIds = [];
+    const completedJobIds = [];
+    const cdpSession = await page.context().newCDPSession(page);
+    await cdpSession.send('Network.enable');
+
+    const wsFrameHandler = (params) => {
+      try {
+        const data = params.response?.payloadData || '';
+        if (!data || data.length < 10) return;
+
+        let frame;
+        try { frame = JSON.parse(data); } catch { return; }
+
+        if (frame.job_id && !interceptedJobIds.includes(frame.job_id)) {
+          interceptedJobIds.push(frame.job_id);
+          logDebug(args.debug, `WS video job: ${frame.job_id} status=${frame.current_status || frame.status || 'unknown'}`);
+        }
+
+        const status = normalizeCompletionStatus(frame.current_status || frame.status);
+        if (frame.job_id && /(complete|completed|done|success|succeeded|finished|ready)/i.test(status) && !completedJobIds.includes(frame.job_id)) {
+          completedJobIds.push(frame.job_id);
+          logDebug(args.debug, `WS completed video job: ${frame.job_id} status=${status}`);
+        }
+
+        const frameStr = data;
+        const assetMatches = frameStr.match(/https?:\/\/[^\s"')\]}>]+(?:\.mp4|imagine-public\.x\.ai[^\s"')\]}>]+)(\?[^\s"')\]}>]*)?/gi);
+        if (assetMatches) {
+          for (const match of assetMatches) {
+            if (!interceptedAssetUrls.includes(match)) {
+              interceptedAssetUrls.push(match);
+              logDebug(args.debug, `WS video asset URL: ${match}`);
+            }
+          }
+        }
+
+        const directUrl = frame.video_url || frame.url || frame.asset_url || frame.download_url || null;
+        if (directUrl && /^https?:/i.test(directUrl) && !interceptedAssetUrls.includes(directUrl)) {
+          interceptedAssetUrls.push(directUrl);
+          logDebug(args.debug, `WS direct video URL field: ${directUrl}`);
+        }
+      } catch {
+        // Ignore parse errors.
+      }
+    };
+    cdpSession.on('Network.webSocketFrameReceived', wsFrameHandler);
+
+    const responseHandler = (response) => {
+      try {
+        const url = response.url();
+        if (response.status() === 200 && /^https?:/i.test(url) && (url.includes('.mp4') || url.includes('imagine-public.x.ai'))) {
+          if (!interceptedAssetUrls.includes(url)) {
+            interceptedAssetUrls.push(url);
+            logDebug(args.debug, `HTTP video asset response: ${url}`);
+          }
+        }
+      } catch {
+        // Ignore.
+      }
+    };
+    page.on('response', responseHandler);
+
     await submitPrompt(page, promptInput, args.debug);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -851,7 +1049,36 @@ async function runPrompt(args) {
       : path.join(args.outDir, `${sanitizeFileName(args.prompt)}-${timestamp}.mp4`);
     ensureDir(path.dirname(outputPath));
 
-    const result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata);
+    let result;
+    try {
+      result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata, interceptedJobIds, completedJobIds);
+    } finally {
+      page.off('response', responseHandler);
+      cdpSession.off('Network.webSocketFrameReceived', wsFrameHandler);
+      await cdpSession.detach().catch(() => {});
+    }
+
+    const resolvedJobIds = result?.jobIds?.length ? result.jobIds : (completedJobIds.length ? completedJobIds : interceptedJobIds);
+    if ((!result?.directUrl || !/^https?:/i.test(result.directUrl)) && resolvedJobIds.length > 0) {
+      for (const jobId of resolvedJobIds.slice(0, 3)) {
+        const postUrl = `https://grok.com/imagine/post/${jobId}`;
+        logDebug(args.debug, `Navigating to video post page: ${postUrl}`);
+        await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
+        await dismissInterruptions(page, args.debug);
+        await page.waitForTimeout(5000);
+        const postMetadata = await extractVideoMetadata(page).catch(() => null);
+        const postDirectUrl = postMetadata ? chooseDirectVideoUrl(postMetadata) : null;
+        if (postDirectUrl) {
+          result = {
+            directUrl: postDirectUrl,
+            metadata: postMetadata,
+            jobIds: resolvedJobIds,
+          };
+          break;
+        }
+      }
+    }
+
     const downloadPath = await downloadViaButton(page, outputPath, args.debug);
     if (downloadPath) {
       console.log(`Downloaded video to ${downloadPath}`);

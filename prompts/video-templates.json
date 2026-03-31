@@ -1,0 +1,1115 @@
+{
+  "defaults": {
+    "default_template_id": "anthropomorphic-fruit-infidelity-drama",
+    "clip_count": 5,
+    "clip_duration_seconds": 6,
+    "target_length_seconds": 30,
+    "reference_strategy": "shared_reference",
+    "aspect_ratio": "9:16",
+    "resolution": "720p",
+    "image_model": "grok-imagine-image",
+    "video_model": "grok-imagine-video"
+  },
+  "ai_prompt_contract": {
+    "grok_prompt_requirements": {
+      "image_prompt_word_range": {
+        "min": 70,
+        "max": 180
+      },
+      "video_prompt_word_range": {
+        "min": 35,
+        "max": 110
+      },
+      "fallback_video_prompt_word_range": {
+        "min": 25,
+        "max": 80
+      }
+    },
+    "compilation_markdown": {
+      "clip_header_pattern": "## Clip N: Name -- Mood",
+      "requires_mood_marker": true,
+      "required_sections": [
+        "Continuity Anchors",
+        "Image Prompt",
+        "Video Prompt",
+        "Fallback Video Prompt"
+      ],
+      "dialogue_in_video_prompt_required": true,
+      "dialogue_in_fallback_prompt_required": true,
+      "speaker_tag_in_video_prompt_required": true,
+      "speaker_tag_in_fallback_prompt_required": true
+    },
+    "rule_profiles": {
+      "general_story": {
+        "system_prompt": "You are an expert short-form video strategist. Build emotionally legible, continuity-safe scene plans for stitched six-second AI video clips.",
+        "core_rules": [
+          "Keep recurring characters visually stable across clips.",
+          "Favor one dominant action per clip.",
+          "Preserve setting, wardrobe, silhouette, and lighting logic unless the beat requires a deliberate change.",
+          "Use simple spoken lines and let visuals carry the scene."
+        ]
+      },
+      "promo": {
+        "system_prompt": "You are an expert short-form promo strategist. Build concise, conversion-oriented video beats.",
+        "core_rules": [
+          "Keep visuals simple and product legible.",
+          "Lead with a hook inside the first clip.",
+          "Use direct benefit language.",
+          "Preserve style consistency across the sequence."
+        ]
+      }
+    },
+    "caption_profiles": {
+      "general_story": {
+        "system_prompt": "Write a short-form social caption for a dramatic AI video. The caption should read naturally, front-load the hook, stay searchable, and feel native to TikTok, Reels, and Shorts.",
+        "topic_intro": "Write a caption for this AI video topic: {topic}",
+        "clip_intro": "The video contains these clips:",
+        "preface": [
+          "Write in a high-retention short-form voice.",
+          "The first 125 characters should carry the hook.",
+          "Make the caption search-friendly without sounding robotic."
+        ],
+        "sections": [
+          {
+            "title": "Hook",
+            "instruction": "Open with the betrayal twist or emotional hook in one or two punchy sentences."
+          },
+          {
+            "title": "Story",
+            "instruction": "Summarize the arc so the viewer understands the setup, reveal, and payoff."
+          },
+          {
+            "title": "Search",
+            "instruction": "Include natural phrasing around AI video, short drama, character story, betrayal arc, or similar discoverable language."
+          },
+          {
+            "title": "CTA",
+            "instruction": "End with a save/share/comment style call to action."
+          }
+        ],
+        "important_rules": [
+          "No markdown.",
+          "No bullet points.",
+          "No quotation marks around the full caption.",
+          "Keep it platform-native and emotionally clear."
+        ]
+      },
+      "promo": {
+        "system_prompt": "Write a short-form promo caption with a strong hook, concise offer framing, and a clear call to action.",
+        "topic_intro": "Write a promo caption for this topic: {topic}",
+        "clip_intro": "The video contains these beats:",
+        "preface": [
+          "Front-load the main benefit.",
+          "Keep the caption skimmable and searchable."
+        ],
+        "sections": [
+          {
+            "title": "Hook",
+            "instruction": "Start with the core promise or surprise."
+          },
+          {
+            "title": "Value",
+            "instruction": "Explain the benefit quickly."
+          },
+          {
+            "title": "CTA",
+            "instruction": "Tell the viewer what to do next."
+          }
+        ],
+        "important_rules": [
+          "No markdown.",
+          "No bullet points.",
+          "Keep it concise."
+        ]
+      }
+    }
+  },
+  "templates": [
+    {
+      "id": "anthropomorphic-fruit-infidelity-drama",
+      "label": "Anthropomorphic Fruit Infidelity Drama",
+      "description": "Continuity-sensitive five-beat fruit relationship drama built from locked cast sheets, scene start frames, and short stitched clips.",
+      "contract_version": 2,
+      "rule_profile": "general_story",
+      "caption_profile": "general_story",
+      "prompting_profile": "grok_fruit_character_drama",
+      "clip_count": 5,
+      "clip_duration_seconds": 6,
+      "target_length_seconds": 30,
+      "reference_strategy": "shared_reference",
+      "aspect_ratio": "9:16",
+      "resolution": "720p",
+      "image_model": "grok-imagine-image",
+      "video_model": "grok-imagine-video",
+      "format_hint": "anthropomorphic fruit betrayal story told as five tight cinematic beats with a locked fruit cast and emotional visual payoff",
+      "ordering_strategy": "opening, suspicion, discovery, confrontation, aftermath",
+      "voice_direction": "high-drama, visually legible, simple dialogue, one named speaker per clip, explicit silent-character control, mobile-readable emotions, one dominant action per beat",
+      "research_notes": [
+        "Start with a strict character turnaround sheet so Grok has a stable visual anchor before scene rendering.",
+        "Keep wardrobe, fruit type, facial geometry, and body proportions fixed across all scenes.",
+        "Use scene start frames with attached cast references whenever multiple fruit characters appear together.",
+        "Favor short dialogue and let reaction acting, props, and framing carry the betrayal story.",
+        "When multiple fruit characters are on-screen, assign exactly one named speaker per clip and explicitly mark the others as silent."
+      ],
+      "creative_direction": [
+        "Use polished stylized 3D character design with readable fruit textures and expressive cartoon-human eyes.",
+        "Build immediate silhouette contrast between the betrayed partner, cheating partner, third party, and witness.",
+        "Keep the locations simple and upscale so props like a phone, doorway, office desk, or café table read instantly on mobile."
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "define the recurring fruit cast",
+          "generate one portrait and one turnaround/reference sheet per recurring character",
+          "author a five-beat story markdown from saved repo state",
+          "generate one scene start frame per clip using cast references",
+          "animate each scene frame into a short clip with simple dialogue",
+          "stitch clips, burn captions, and save the final run artifacts"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card per clip with image-first continuity locking"
+      },
+      "video_execution_contract": {
+        "builder_version": 1,
+        "lines": {
+          "preamble": [
+            "Create a vertical 9:16 video clip.",
+            "Target duration: {{clip_duration_seconds}} seconds.",
+            "Treat the following image direction as the opening frame and visual identity to preserve.",
+            "Continuity is more important than novelty or extra detail.",
+            "If recurring characters are present, keep the exact same face/head design, silhouette, wardrobe logic, proportions, palette, environment, and cinematic style established by the image direction and continuity anchors.",
+            "Do not redesign characters into generic humans, new costumes, or a different art style.",
+            "If dialogue makes the acting feel weak, keep the acting simple and let the visual beat stay dominant."
+          ],
+          "image_direction_header": "IMAGE DIRECTION:",
+          "continuity_header": "CONTINUITY ANCHORS:",
+          "default_continuity_anchors": "Preserve the same identity, wardrobe, set, and overall style established by the image prompt.",
+          "motion_intro": "Animate that exact scene using this motion and dialogue direction:",
+          "video_direction_header": "VIDEO DIRECTION:",
+          "speaker_named": "Only {{speaker}} may deliver the spoken line in this clip.",
+          "speaker_none": "If a spoken line is present, keep it assigned to one clearly readable speaker.",
+          "speaker_lock_named": "Speaker lock: {{speaker}} is the only character allowed to produce audible speech, lip-sync, whisper words, narrate, or mouth the dialogue.",
+          "speaker_lock_none": "If no named speaker is provided, prefer no audible dialogue over assigning the line to the wrong character.",
+          "silent_characters_named": "{{silent_characters}} stay on-screen silent and must not mouth, lip-sync, whisper, narrate, or appear to say the line.",
+          "silent_characters_none": "Any other visible characters stay silent unless the prompt explicitly says otherwise.",
+          "dialogue_named": "Use exactly this spoken line: \"{{dialogue}}\"",
+          "dialogue_none": "Use no spoken dialogue unless the motion direction explicitly requires it.",
+          "wrong_speaker_failsafe_named": "If the line cannot be cleanly assigned to {{speaker}}, output no audible dialogue instead of giving the line to another character.",
+          "wrong_speaker_failsafe_none": "Do not let the wrong character deliver the line.",
+          "staging_named": "Keep staging and face visibility clear so {{speaker}} is the obvious readable source of the line when speech occurs.",
+          "staging_none": "Keep staging clear so any speaking source is visually unambiguous.",
+          "action_none": "Keep one dominant visible action.",
+          "ending": [
+            "Keep the framing, character, body-part context, and action clear and legible.",
+            "Output a single finished video clip."
+          ]
+        }
+      },
+      "tool_plan_contract": {
+        "asset_jobs": [
+          {
+            "id": "cast-portrait",
+            "stage": "cast",
+            "kind": "generate_image",
+            "source": "cast_assets",
+            "prompt_field": "portrait_prompt",
+            "output_field": "portrait_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "include_reference_siblings": true,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "cast-reference-sheet",
+            "stage": "cast",
+            "kind": "generate_image",
+            "source": "cast_assets",
+            "prompt_field": "reference_sheet_prompt",
+            "output_field": "reference_sheet_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "prepend_output_fields": [
+              "portrait_output_path"
+            ],
+            "reference_priority_patterns": [
+              "assets/cast/"
+            ],
+            "include_reference_siblings": true,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "cast-reference-sheet-match",
+            "stage": "cast",
+            "kind": "verify_reference_consistency",
+            "source": "cast_assets",
+            "subject_output_field": "reference_sheet_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "prepend_output_fields": [
+              "portrait_output_path"
+            ],
+            "reference_priority_patterns": [
+              "assets/cast/"
+            ],
+            "include_reference_siblings": true,
+            "rules": [
+              "Match the exact same fruit identity and face geometry as the approved hero portrait.",
+              "Do not redesign the character into a different fruit type, outfit, or silhouette.",
+              "Keep the same proportions, palette, material finish, and wardrobe while changing only the presentation into turnaround-sheet form."
+            ]
+          },
+          {
+            "id": "scene-start-frame",
+            "stage": "scene-frames",
+            "kind": "generate_image",
+            "source": "scene_start_frames",
+            "prompt_field": "image_prompt",
+            "output_field": "output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "reference_priority_patterns": [
+              "assets/reference-sheets/",
+              "assets/cast/"
+            ],
+            "include_reference_siblings": false,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "scene-start-frame-match",
+            "stage": "scene-frames",
+            "kind": "verify_reference_consistency",
+            "source": "scene_start_frames",
+            "subject_output_field": "output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "reference_priority_patterns": [
+              "assets/reference-sheets/",
+              "assets/cast/"
+            ],
+            "include_reference_siblings": false,
+            "rules_from_continuity_priority": true
+          }
+        ]
+      },
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the fruit-drama concept, hook, and emotional payoff in 2-4 sentences. State why this cast contrast is legible at a glance on Shorts/Reels/TikTok.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Fruit Cast Sheet",
+          "instruction": "List every recurring fruit character by fruit type, name, role, outfit, emotional energy, and locked visual details. Keep wardrobe and silhouette rules explicit.",
+          "required": true,
+          "min_words": 60
+        },
+        {
+          "title": "Location Lock",
+          "instruction": "Name the recurring locations and specify the props, lighting logic, and color accents that should stay consistent across clips.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Specify which portrait assets, turnaround/reference sheets, and scene start frames must exist before rendering. Mention which scenes need multiple character references attached.",
+          "required": true,
+          "min_words": 45
+        }
+      ],
+      "asset_contract": {
+        "requires_character_assets": true,
+        "requires_scene_start_frames": true,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": true,
+        "requires_locked_wardrobe": true,
+        "requires_role_assignment": true,
+        "minimum_cast_size": 4,
+        "role_blueprint": [
+          {
+            "role": "betrayed_partner",
+            "energy": "soft, warm, trusting, the emotional anchor viewers root for",
+            "good_picks": [
+              "peach",
+              "strawberry",
+              "cherry"
+            ]
+          },
+          {
+            "role": "cheating_partner",
+            "energy": "smooth, charming, distant, two-faced under pressure",
+            "good_picks": [
+              "lemon",
+              "lime",
+              "pear"
+            ]
+          },
+          {
+            "role": "third_party",
+            "energy": "bold, glamorous, seductive, visually distinct from the couple",
+            "good_picks": [
+              "mango",
+              "plum",
+              "grape"
+            ]
+          },
+          {
+            "role": "witness_ally",
+            "energy": "reliable, grounded, reveals the truth or comforts the betrayed partner",
+            "good_picks": [
+              "orange",
+              "kiwi",
+              "apple"
+            ]
+          }
+        ]
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "opening",
+          "suspicion",
+          "discovery",
+          "confrontation",
+          "aftermath"
+        ],
+        "scene_prompt_strategy": "each clip should open from a continuity-locked scene frame, then animate one dominant emotional action with clean staging, one named speaker at most, and explicit silent-character control"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "fruit identity",
+          "head geometry and facial features",
+          "wardrobe",
+          "body proportions",
+          "environment",
+          "color palette",
+          "lighting"
+        ]
+      },
+      "video_examples": [
+        "Clip 1 should establish the couple in a calm everyday setting before any reveal.",
+        "Clip 3 should make the discovery unmistakable with a readable prop or facial reaction.",
+        "Clip 4 should be the emotional peak with simple blocking and maximum clarity."
+      ],
+      "dialogue_examples": [
+        "\"Who is she?\"",
+        "\"You lied to me.\"",
+        "\"I saw everything.\""
+      ]
+    },
+    {
+      "id": "anthropomorphic-fruit-revenge-drama",
+      "label": "Anthropomorphic Fruit Revenge Drama",
+      "description": "Continuity-sensitive five-beat fruit revenge short built from locked cast sheets, scene start frames, visible proof, absurd justice, and a cliffhanger-ready ending.",
+      "contract_version": 2,
+      "rule_profile": "general_story",
+      "caption_profile": "general_story",
+      "prompting_profile": "grok_fruit_character_drama",
+      "clip_count": 5,
+      "clip_duration_seconds": 6,
+      "target_length_seconds": 30,
+      "reference_strategy": "shared_reference",
+      "aspect_ratio": "9:16",
+      "resolution": "720p",
+      "image_model": "grok-imagine-image",
+      "video_model": "grok-imagine-video",
+      "format_hint": "anthropomorphic fruit revenge story told as five tight cinematic beats with a locked fruit cast, visible injustice, satisfying payback, and a cliffhanger sting",
+      "ordering_strategy": "wrong, proof, setup, justice, cliffhanger",
+      "voice_direction": "absurd but emotionally clear, one named speaker per clip, explicit silent-character control, mobile-readable justice beats, one dominant action per scene, cliffhanger-ready ending",
+      "research_notes": [
+        "Lock the recurring fruit cast with one approved hero portrait and one derived reference sheet per main character before scene generation.",
+        "Keep fruit identity, facial geometry, wardrobe, body proportions, and color coding fixed across all clips.",
+        "Make the original wrongdoing and the revenge payoff visually legible through props, staging, and one clear turn per scene.",
+        "Use scene start frames with attached cast references whenever multiple fruit characters appear together.",
+        "Favor short dialogue and let the trap, reveal, or public humiliation carry the satisfaction.",
+        "Let the final beat land justice first, then add a cliffhanger sting that implies the world is not fully done escalating."
+      ],
+      "creative_direction": [
+        "Use polished stylized 3D fruit characters with premium rind texture, expressive cartoon-human eyes, strong silhouette contrast, and cinematic mobile-readable staging.",
+        "Make the wronged lead sympathetic at a glance and the target visibly smug, slippery, or ridiculous before the tables turn.",
+        "Keep revenge mechanisms absurd but concrete: giant dessert trap, humiliating juice spill, booby-trapped stage reveal, collapsing tower of lies, or a public fruit-market payoff that reads instantly on mobile.",
+        "Preserve one recurring hero location and one payoff location so the world feels stable while the justice escalates."
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "define the recurring fruit cast and the injustice that triggers the revenge",
+          "generate one portrait and one turnaround/reference sheet per recurring character",
+          "author a five-beat revenge markdown from saved repo state",
+          "generate one scene start frame per clip using cast references",
+          "animate each scene frame into a short clip with simple dialogue",
+          "stitch clips, burn captions, and save the final run artifacts"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card per clip with image-first continuity locking"
+      },
+      "video_execution_contract": {
+        "builder_version": 1,
+        "lines": {
+          "preamble": [
+            "Create a vertical 9:16 video clip.",
+            "Target duration: {{clip_duration_seconds}} seconds.",
+            "Treat the following image direction as the opening frame and visual identity to preserve.",
+            "Continuity is more important than novelty or extra detail.",
+            "If recurring characters are present, keep the exact same face/head design, silhouette, wardrobe logic, proportions, palette, environment, and cinematic style established by the image direction and continuity anchors.",
+            "Do not redesign characters into generic humans, new costumes, or a different art style.",
+            "If dialogue makes the acting feel weak, keep the acting simple and let the visual beat stay dominant."
+          ],
+          "image_direction_header": "IMAGE DIRECTION:",
+          "continuity_header": "CONTINUITY ANCHORS:",
+          "default_continuity_anchors": "Preserve the same identity, wardrobe, set, and overall style established by the image prompt.",
+          "motion_intro": "Animate that exact scene using this motion and dialogue direction:",
+          "video_direction_header": "VIDEO DIRECTION:",
+          "speaker_named": "Only {{speaker}} may deliver the spoken line in this clip.",
+          "speaker_none": "If a spoken line is present, keep it assigned to one clearly readable speaker.",
+          "speaker_lock_named": "Speaker lock: {{speaker}} is the only character allowed to produce audible speech, lip-sync, whisper words, narrate, or mouth the dialogue.",
+          "speaker_lock_none": "If no named speaker is provided, prefer no audible dialogue over assigning the line to the wrong character.",
+          "silent_characters_named": "{{silent_characters}} stay on-screen silent and must not mouth, lip-sync, whisper, narrate, or appear to say the line.",
+          "silent_characters_none": "Any other visible characters stay silent unless the prompt explicitly says otherwise.",
+          "dialogue_named": "Use exactly this spoken line: \"{{dialogue}}\"",
+          "dialogue_none": "Use no spoken dialogue unless the motion direction explicitly requires it.",
+          "wrong_speaker_failsafe_named": "If the line cannot be cleanly assigned to {{speaker}}, output no audible dialogue instead of giving the line to another character.",
+          "wrong_speaker_failsafe_none": "Do not let the wrong character deliver the line.",
+          "staging_named": "Keep staging and face visibility clear so {{speaker}} is the obvious readable source of the line when speech occurs.",
+          "staging_none": "Keep staging clear so any speaking source is visually unambiguous.",
+          "action_none": "Keep one dominant visible action.",
+          "ending": [
+            "Keep the framing, character, body-part context, and action clear and legible.",
+            "Output a single finished video clip."
+          ]
+        }
+      },
+      "tool_plan_contract": {
+        "asset_jobs": [
+          {
+            "id": "cast-portrait",
+            "stage": "cast",
+            "kind": "generate_image",
+            "source": "cast_assets",
+            "prompt_field": "portrait_prompt",
+            "output_field": "portrait_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "include_reference_siblings": true,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "cast-reference-sheet",
+            "stage": "cast",
+            "kind": "generate_image",
+            "source": "cast_assets",
+            "prompt_field": "reference_sheet_prompt",
+            "output_field": "reference_sheet_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "prepend_output_fields": [
+              "portrait_output_path"
+            ],
+            "reference_priority_patterns": [
+              "assets/cast/"
+            ],
+            "include_reference_siblings": true,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "cast-reference-sheet-match",
+            "stage": "cast",
+            "kind": "verify_reference_consistency",
+            "source": "cast_assets",
+            "subject_output_field": "reference_sheet_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "prepend_output_fields": [
+              "portrait_output_path"
+            ],
+            "reference_priority_patterns": [
+              "assets/cast/"
+            ],
+            "include_reference_siblings": true,
+            "rules": [
+              "Match the exact same fruit identity and face geometry as the approved hero portrait.",
+              "Do not redesign the character into a different fruit type, outfit, or silhouette.",
+              "Keep the same proportions, palette, material finish, and wardrobe while changing only the presentation into turnaround-sheet form."
+            ]
+          },
+          {
+            "id": "scene-start-frame",
+            "stage": "scene-frames",
+            "kind": "generate_image",
+            "source": "scene_start_frames",
+            "prompt_field": "image_prompt",
+            "output_field": "output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "reference_priority_patterns": [
+              "assets/reference-sheets/",
+              "assets/cast/"
+            ],
+            "include_reference_siblings": false,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "scene-start-frame-match",
+            "stage": "scene-frames",
+            "kind": "verify_reference_consistency",
+            "source": "scene_start_frames",
+            "subject_output_field": "output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "reference_priority_patterns": [
+              "assets/reference-sheets/",
+              "assets/cast/"
+            ],
+            "include_reference_siblings": false,
+            "rules_from_continuity_priority": true
+          }
+        ]
+      },
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the fruit revenge concept, the triggering injustice, the absurd justice mechanism, and the cliffhanger payoff in 2-4 sentences. State why the cast contrast and revenge turn are legible at a glance on Shorts/Reels/TikTok.",
+          "required": true,
+          "min_words": 40
+        },
+        {
+          "title": "Fruit Cast Sheet",
+          "instruction": "List every recurring fruit character by fruit type, name, role, outfit, emotional energy, and locked visual details. Make the wronged lead, target, and any ally or witness instantly distinguishable.",
+          "required": true,
+          "min_words": 65
+        },
+        {
+          "title": "Justice Mechanic",
+          "instruction": "Explain the concrete revenge device, prop, or public reveal that makes the payoff absurd but satisfying. Keep it visual, simple, and safe for short-form viewing.",
+          "required": true,
+          "min_words": 40
+        },
+        {
+          "title": "Location Lock",
+          "instruction": "Name the recurring locations and specify the props, lighting logic, and color accents that should stay consistent across clips.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Specify which portrait assets, turnaround/reference sheets, and scene start frames must exist before rendering. Mention which scenes need multiple character references attached and which clip lands the cliffhanger.",
+          "required": true,
+          "min_words": 50
+        }
+      ],
+      "asset_contract": {
+        "requires_character_assets": true,
+        "requires_scene_start_frames": true,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": true,
+        "requires_locked_wardrobe": true,
+        "requires_role_assignment": true,
+        "minimum_cast_size": 3,
+        "role_blueprint": [
+          {
+            "role": "wronged_lead",
+            "energy": "sympathetic, bruised but observant, then increasingly sharp and in control",
+            "good_picks": [
+              "cherry",
+              "peach",
+              "strawberry"
+            ]
+          },
+          {
+            "role": "target_of_revenge",
+            "energy": "smug, flashy, dismissive, ridiculous once exposed",
+            "good_picks": [
+              "lemon",
+              "lime",
+              "pear"
+            ]
+          },
+          {
+            "role": "witness_or_ally",
+            "energy": "grounded, useful, helps reveal the truth or trigger the payoff",
+            "good_picks": [
+              "orange",
+              "kiwi",
+              "apple"
+            ]
+          }
+        ]
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "wrong",
+          "proof",
+          "setup",
+          "justice",
+          "cliffhanger"
+        ],
+        "scene_prompt_strategy": "each clip should open from a continuity-locked scene frame, then animate one dominant revenge beat with clear staging, one named speaker at most, explicit silent-character control, a visible justice turn, and a final sting that invites the next episode"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "fruit identity",
+          "head geometry and facial features",
+          "wardrobe",
+          "body proportions",
+          "environment",
+          "color palette",
+          "lighting"
+        ]
+      },
+      "video_examples": [
+        "Clip 1 should show the humiliating wrong in one clear image beat.",
+        "Clip 3 should make the revenge setup visible before the justice lands.",
+        "Clip 5 should feel satisfying first, then end with a stinger that implies a bigger aftermath."
+      ],
+      "dialogue_examples": [
+        "\"You really thought I wouldn't notice?\"",
+        "\"Smile for everyone.\"",
+        "\"This is only part one.\""
+      ]
+    },
+    {
+      "id": "anthropomorphic-alphabet-infidelity-drama",
+      "label": "Anthropomorphic Alphabet Infidelity Drama",
+      "description": "Continuity-sensitive five-beat Pixar-style letter-character betrayal drama built from locked cast sheets, scene start frames, and short stitched clips.",
+      "contract_version": 2,
+      "rule_profile": "general_story",
+      "caption_profile": "general_story",
+      "prompting_profile": "grok_alphabet_character_drama",
+      "clip_count": 5,
+      "clip_duration_seconds": 6,
+      "target_length_seconds": 30,
+      "reference_strategy": "shared_reference",
+      "aspect_ratio": "9:16",
+      "resolution": "720p",
+      "image_model": "grok-imagine-image",
+      "video_model": "grok-imagine-video",
+      "format_hint": "anthropomorphic Pixar-style alphabet-letter betrayal story told as five tight scandalous beats with a locked letter cast, extreme caricature contrast, and a moral payoff",
+      "ordering_strategy": "opening, suspicion, discovery, confrontation, aftermath",
+      "voice_direction": "high-drama, scandal-forward, visually legible, simple dialogue, one named speaker per clip, explicit silent-character control, mobile-readable emotions, one dominant action per beat",
+      "research_notes": [
+        "Start with a strict character turnaround sheet so Grok has a stable visual anchor before scene rendering.",
+        "Keep letter identity, face geometry, outfit, color coding, and body proportions fixed across all scenes.",
+        "Use scene start frames with attached cast references whenever multiple letter characters appear together.",
+        "Favor short dialogue and let reaction acting, props, and framing carry the betrayal story.",
+        "When multiple letter characters are on-screen, assign exactly one named speaker per clip and explicitly mark the others as silent.",
+        "Push the cast away from mundane design: make the attractive characters hyper-polished and the loyal or foolish characters exaggerated in the opposite direction.",
+        "Give the payoff a visible lesson such as vanity, lust, greed, or humiliation backfiring on the cheater."
+      ],
+      "creative_direction": [
+        "Use polished stylized 3D Pixar-like character design with glossy letterforms, readable serifs or curves, expressive cartoon-human eyes, and strong shape language.",
+        "Build immediate silhouette contrast between the betrayed partner, cheating partner, and third party. An ally is optional, not required.",
+        "Avoid average designs. Make the hot character obviously glamorous and the ugly or foolish character obviously exaggerated.",
+        "Keep the locations simple and upscale so props like a phone, lipstick mark, hallway mirror, cafe table, or glass doorway read instantly on mobile."
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "define the recurring letter cast",
+          "generate one portrait and one turnaround/reference sheet per recurring character",
+          "author a five-beat story markdown from saved repo state",
+          "generate one scene start frame per clip using cast references",
+          "animate each scene frame into a short clip with simple dialogue",
+          "stitch clips, burn captions, and save the final run artifacts"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card per clip with image-first continuity locking"
+      },
+      "video_execution_contract": {
+        "builder_version": 1,
+        "lines": {
+          "preamble": [
+            "Create a vertical 9:16 video clip.",
+            "Target duration: {{clip_duration_seconds}} seconds.",
+            "Treat the following image direction as the opening frame and visual identity to preserve.",
+            "Continuity is more important than novelty or extra detail.",
+            "If recurring characters are present, keep the exact same face/head design, silhouette, wardrobe logic, proportions, palette, environment, and cinematic style established by the image direction and continuity anchors.",
+            "Do not redesign characters into generic humans, new costumes, or a different art style.",
+            "If dialogue makes the acting feel weak, keep the acting simple and let the visual beat stay dominant."
+          ],
+          "image_direction_header": "IMAGE DIRECTION:",
+          "continuity_header": "CONTINUITY ANCHORS:",
+          "default_continuity_anchors": "Preserve the same identity, wardrobe, set, and overall style established by the image prompt.",
+          "motion_intro": "Animate that exact scene using this motion and dialogue direction:",
+          "video_direction_header": "VIDEO DIRECTION:",
+          "speaker_named": "Only {{speaker}} may deliver the spoken line in this clip.",
+          "speaker_none": "If a spoken line is present, keep it assigned to one clearly readable speaker.",
+          "speaker_lock_named": "Speaker lock: {{speaker}} is the only character allowed to produce audible speech, lip-sync, whisper words, narrate, or mouth the dialogue.",
+          "speaker_lock_none": "If no named speaker is provided, prefer no audible dialogue over assigning the line to the wrong character.",
+          "silent_characters_named": "{{silent_characters}} stay on-screen silent and must not mouth, lip-sync, whisper, narrate, or appear to say the line.",
+          "silent_characters_none": "Any other visible characters stay silent unless the prompt explicitly says otherwise.",
+          "dialogue_named": "Use exactly this spoken line: \"{{dialogue}}\"",
+          "dialogue_none": "Use no spoken dialogue unless the motion direction explicitly requires it.",
+          "wrong_speaker_failsafe_named": "If the line cannot be cleanly assigned to {{speaker}}, output no audible dialogue instead of giving the line to another character.",
+          "wrong_speaker_failsafe_none": "Do not let the wrong character deliver the line.",
+          "staging_named": "Keep staging and face visibility clear so {{speaker}} is the obvious readable source of the line when speech occurs.",
+          "staging_none": "Keep staging clear so any speaking source is visually unambiguous.",
+          "action_none": "Keep one dominant visible action.",
+          "ending": [
+            "Keep the framing, character, body-part context, and action clear and legible.",
+            "Output a single finished video clip."
+          ]
+        }
+      },
+      "tool_plan_contract": {
+        "asset_jobs": [
+          {
+            "id": "cast-portrait",
+            "stage": "cast",
+            "kind": "generate_image",
+            "source": "cast_assets",
+            "prompt_field": "portrait_prompt",
+            "output_field": "portrait_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "include_reference_siblings": true,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "cast-reference-sheet",
+            "stage": "cast",
+            "kind": "generate_image",
+            "source": "cast_assets",
+            "prompt_field": "reference_sheet_prompt",
+            "output_field": "reference_sheet_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "prepend_output_fields": [
+              "portrait_output_path"
+            ],
+            "reference_priority_patterns": [
+              "assets/cast/"
+            ],
+            "include_reference_siblings": true,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "cast-reference-sheet-match",
+            "stage": "cast",
+            "kind": "verify_reference_consistency",
+            "source": "cast_assets",
+            "subject_output_field": "reference_sheet_output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "prepend_output_fields": [
+              "portrait_output_path"
+            ],
+            "reference_priority_patterns": [
+              "assets/cast/"
+            ],
+            "include_reference_siblings": true,
+            "rules": [
+              "Match the exact same letter identity and character design as the approved hero portrait.",
+              "Do not redesign the subject into a generic human standing near the letterform.",
+              "Keep the same silhouette, proportions, palette, wardrobe, and material finish while changing only the presentation into turnaround-sheet form."
+            ]
+          },
+          {
+            "id": "scene-start-frame",
+            "stage": "scene-frames",
+            "kind": "generate_image",
+            "source": "scene_start_frames",
+            "prompt_field": "image_prompt",
+            "output_field": "output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "reference_priority_patterns": [
+              "assets/reference-sheets/",
+              "assets/cast/"
+            ],
+            "include_reference_siblings": false,
+            "allow_letter_characters_from_prompt": true
+          },
+          {
+            "id": "scene-start-frame-match",
+            "stage": "scene-frames",
+            "kind": "verify_reference_consistency",
+            "source": "scene_start_frames",
+            "subject_output_field": "output_path",
+            "reference_fields": [
+              "reference_image_paths"
+            ],
+            "reference_priority_patterns": [
+              "assets/reference-sheets/",
+              "assets/cast/"
+            ],
+            "include_reference_siblings": false,
+            "rules_from_continuity_priority": true
+          }
+        ]
+      },
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the alphabet-drama concept, hook, scandal, and moral payoff in 2-4 sentences. State why this cast contrast is legible at a glance on Shorts/Reels/TikTok.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Letter Cast Sheet",
+          "instruction": "List every recurring letter character by letterform, name, role, outfit, emotional energy, attractiveness/extreme caricature direction, and locked visual details. Keep color coding, wardrobe, and silhouette rules explicit.",
+          "required": true,
+          "min_words": 60
+        },
+        {
+          "title": "Location Lock",
+          "instruction": "Name the recurring locations and specify the props, lighting logic, and color accents that should stay consistent across clips.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Specify which portrait assets, turnaround/reference sheets, and scene start frames must exist before rendering. Mention which scenes need multiple character references attached.",
+          "required": true,
+          "min_words": 45
+        }
+      ],
+      "asset_contract": {
+        "requires_character_assets": true,
+        "requires_scene_start_frames": true,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": true,
+        "requires_locked_wardrobe": true,
+        "requires_role_assignment": true,
+        "minimum_cast_size": 3,
+        "role_blueprint": [
+          {
+            "role": "betrayed_partner",
+            "energy": "soft, warm, trusting, the emotional anchor viewers root for",
+            "good_picks": [
+              "A",
+              "O",
+              "M"
+            ]
+          },
+          {
+            "role": "cheating_partner",
+            "energy": "smooth, charming, distant, two-faced under pressure",
+            "good_picks": [
+              "B",
+              "R",
+              "K"
+            ]
+          },
+          {
+            "role": "third_party",
+            "energy": "bold, glamorous, seductive, visually distinct from the couple",
+            "good_picks": [
+              "C",
+              "S",
+              "X"
+            ]
+          }
+        ]
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "opening",
+          "suspicion",
+          "discovery",
+          "confrontation",
+          "aftermath"
+        ],
+        "scene_prompt_strategy": "each clip should open from a continuity-locked scene frame, then animate one dominant scandalous emotional action with clean staging, one named speaker at most, explicit silent-character control, and a visible moral turn by the end"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "letter identity",
+          "face geometry and facial features",
+          "wardrobe",
+          "body proportions",
+          "environment",
+          "color palette",
+          "lighting"
+        ]
+      },
+      "video_examples": [
+        "Clip 1 should establish the couple in a calm everyday setting before any reveal.",
+        "Clip 3 should make the discovery unmistakable with a readable prop or facial reaction.",
+        "Clip 4 should be the emotional peak with simple blocking and maximum clarity."
+      ],
+      "dialogue_examples": [
+        "\"Who keeps calling you?\"",
+        "\"You lied to me.\"",
+        "\"I saw the two of you.\""
+      ]
+    },
+    {
+      "id": "cute-character-asmr-destruction",
+      "label": "Cute Character ASMR Destruction",
+      "description": "Continuity-sensitive single-clip character ASMR cut built around one locked mascot, one tactile payoff action, silent personification, and a strong cross-section reveal.",
+      "contract_version": 2,
+      "rule_profile": "general_story",
+      "caption_profile": "general_story",
+      "prompting_profile": "grok_cute_character_asmr_destruction",
+      "clip_count": 1,
+      "clip_duration_seconds": 6,
+      "target_length_seconds": 6,
+      "reference_strategy": "shared_reference",
+      "aspect_ratio": "9:16",
+      "resolution": "720p",
+      "image_model": "grok-imagine-image",
+      "video_model": "grok-imagine-video",
+      "format_hint": "cute surreal character ASMR cut told as one clean 6-second tactile action with a locked single-character design, tabletop continuity, minimal ASMR-safe personification, and a satisfying interior reveal",
+      "ordering_strategy": "single tactile payoff: frame, tap, cut, reveal",
+      "voice_direction": "default to no narration, hyper-tactile cut audio, one dominant hand action, and preserve the exact same subject identity and tabletop world throughout the shot. Minimal character reaction is allowed only if it stays soft, sparse, and fully ASMR-adherent.",
+      "research_notes": [
+        "Default the format to one 6-second clip unless the user explicitly asks for a multi-beat sequence.",
+        "Use an image-first workflow and reuse the same opening-frame identity so the mascot does not drift during the cut.",
+        "For character-based ASMR, personify the subject primarily through eyes, posture, finger tension, and tiny flinches. Small soft reactions can work, but avoid full voiceover, chatter, or anything that overpowers the tactile sound bed.",
+        "Concentrate sound intent on crisp tactile cues such as steel tap, bark crack, fibrous slice, board knock, and dry crumbs.",
+        "Stay in a simple tabletop environment with stable lighting, camera height, cutting board texture, and prop palette.",
+        "When browser fallback is required, prefer references generated inside the pipeline so moderation and identity continuity are both easier to preserve."
+      ],
+      "creative_direction": [
+        "Make the mascot cute and uncanny at the same time: stylized, meme-readable, but rendered with premium tactile materials.",
+        "Favor clean macro compositions, crisp knife alignment, visible crumbs or soft foam texture, and restrained hand motion.",
+        "Treat the cut itself as the hero beat instead of spending most of the runtime on setup.",
+        "Keep the subject emotionally readable without relying on narration: the viewer should feel that the character is present during the cut through expression, posture, and at most a tiny ASMR-safe reaction.",
+        "Use a neat cross-section reveal as the main payoff, not screaming, chatter, or chaotic reactions."
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "lock the recurring mascot design with explicit species, silhouette, palette, and accessory rules",
+          "author a single-beat ASMR markdown from saved repo state",
+          "generate one continuity-safe opening frame or shared reference image",
+          "animate one dominant tactile action with a visible reveal payoff",
+          "stitch clips if needed, burn captions only when there is actual dialogue, and save the final run artifacts"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card with image-first continuity locking"
+      },
+      "video_execution_contract": {
+        "builder_version": 1,
+        "lines": {
+          "preamble": [
+            "Create a vertical 9:16 video clip.",
+            "Target duration: {{clip_duration_seconds}} seconds.",
+            "Treat the following image direction as the opening frame and exact tactile setup to preserve.",
+            "Continuity is more important than novelty or extra detail.",
+            "Keep the exact same subject identity, silhouette, bark or foam logic, tabletop environment, lighting, and tool setup established by the image direction and continuity anchors.",
+            "Do not redesign the mascot, replace the set, or add random new props.",
+            "Prefer tactile clarity and ASMR-safe acting over extra performance."
+          ],
+          "image_direction_header": "IMAGE DIRECTION:",
+          "continuity_header": "CONTINUITY ANCHORS:",
+          "default_continuity_anchors": "Preserve the same mascot identity, tabletop setup, and tactile material logic established by the image prompt.",
+          "motion_intro": "Animate that exact setup using this action and audio direction:",
+          "video_direction_header": "VIDEO DIRECTION:",
+          "speaker_named": "Only {{speaker}} may deliver the spoken sound in this clip.",
+          "speaker_none": "If a spoken sound is not clearly assigned, prefer no speech.",
+          "speaker_lock_named": "Speaker lock: {{speaker}} is the only subject allowed to produce audible speech, lip-sync, whisper words, or mouth the sound.",
+          "speaker_lock_none": "Prefer no dialogue over giving a sound to the wrong source.",
+          "silent_characters_named": "{{silent_characters}} stay silent and must not mouth, lip-sync, whisper, narrate, or appear to say the sound.",
+          "silent_characters_none": "Any other visible subjects stay silent unless the prompt explicitly says otherwise.",
+          "dialogue_named": "Use exactly this spoken sound: \"{{dialogue}}\"",
+          "dialogue_none": "Use no spoken dialogue unless the motion direction explicitly requires a tiny ASMR-safe reaction.",
+          "wrong_speaker_failsafe_named": "If the sound cannot be cleanly assigned to {{speaker}}, output no speech instead of giving the sound to another source.",
+          "wrong_speaker_failsafe_none": "Do not let the wrong source deliver a sound.",
+          "staging_named": "Keep staging and mouth visibility clear so {{speaker}} is the obvious readable source if speech occurs.",
+          "staging_none": "Keep staging clear so any sound source is visually unambiguous.",
+          "action_none": "Keep one dominant tactile action.",
+          "ending": [
+            "Keep the tactile motion, framing, and reveal legible.",
+            "Output a single finished video clip."
+          ]
+        }
+      },
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the single-shot character ASMR concept, the character hook, and the tactile payoff in 2-4 sentences. Make clear why one 6-second cut is enough and why the subject stays readable on Shorts/Reels/TikTok.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Character Lock",
+          "instruction": "Define the recurring mascot's species mix, proportions, facial features, bark/fur/foam texture, accessories, and any signature pose or silhouette details that must never drift.",
+          "required": true,
+          "min_words": 55
+        },
+        {
+          "title": "Texture and Tool Lock",
+          "instruction": "Specify the tabletop setup, cutting board, knife style, hand styling, lighting, exact interior material, and the tactile sound cues the cut should imply.",
+          "required": true,
+          "min_words": 40
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Record the shared reference image, any optional character portrait, and any scene start frames needed before rendering. Mention how the single shot preserves continuity from first frame to reveal frame.",
+          "required": true,
+          "min_words": 35
+        }
+      ],
+      "asset_contract": {
+        "requires_character_assets": false,
+        "requires_scene_start_frames": false,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": true,
+        "requires_locked_wardrobe": false,
+        "requires_role_assignment": true,
+        "minimum_cast_size": 1,
+        "role_blueprint": [
+          {
+            "role": "main_subject",
+            "energy": "cute, uncanny, tactile, toy-like, and instantly meme-readable",
+            "good_picks": [
+              "brainrot mascot",
+              "creature-plush hybrid",
+              "tree-monkey mascot"
+            ]
+          }
+        ]
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "single center cut"
+        ],
+        "scene_prompt_strategy": "the clip should open from a continuity-locked tabletop frame, then animate one tactile hand-tool action with macro clarity, crisp implied cutting audio, a minimal ASMR-safe character reaction if needed, and a satisfying reveal by the end of the shot"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "character identity",
+          "head geometry and face",
+          "bark and interior texture logic",
+          "accessories and silhouette",
+          "tabletop environment",
+          "lighting and color palette"
+        ]
+      },
+      "video_examples": [
+        "The single clip should start already framed for the cut so the 6-second runtime is spent on the payoff rather than a long setup.",
+        "The knife tap and the shell crack should feel crisp and deliberate, with no narration or distracting chatter layered over them.",
+        "The final second should clearly show the cross-section texture so viewers understand the payoff instantly."
+      ],
+      "dialogue_examples": [
+        "\"ah.\""
+      ]
+    }
+  ]
+}

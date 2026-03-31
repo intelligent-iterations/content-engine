@@ -17,6 +17,16 @@ const COOKIE_FILE = path.join(REPO_ROOT, 'cookies', 'instagram_cookies.json');
 
 dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 
+function chromiumLaunchOptions(headless) {
+  const executablePath = fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined;
+  return {
+    headless,
+    slowMo: headless ? 0 : 40,
+    executablePath,
+    args: executablePath ? ['--no-sandbox'] : undefined,
+  };
+}
+
 async function loadCookies(context) {
   if (!fs.existsSync(COOKIE_FILE)) return false;
   const raw = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
@@ -123,16 +133,114 @@ async function saveDebugScreenshot(page, label) {
   }
 }
 
+async function getInstagramComposerRoot(page) {
+  const candidateRoots = [
+    page.locator('[role="dialog"]').filter({
+      hasText: /create new post|create reel|drag photos and videos here|select from computer|crop|edit|write a caption|share/i,
+    }).last(),
+    page.locator('[role="presentation"]').filter({
+      hasText: /create new post|create reel|drag photos and videos here|select from computer|crop|edit|write a caption|share/i,
+    }).last(),
+    page.locator('[role="dialog"]').last(),
+    page.locator('[role="presentation"]').last(),
+  ];
+
+  for (const root of candidateRoots) {
+    if (await root.isVisible({ timeout: 1200 }).catch(() => false)) {
+      return root;
+    }
+  }
+
+  return null;
+}
+
+async function readInstagramComposerState(page) {
+  return page.evaluate(() => {
+    const nodes = Array.from(document.querySelectorAll('[role="dialog"], [role="presentation"]'));
+    const visibleNodes = nodes.filter(node => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 260
+        && rect.height > 160
+        && style.display !== 'none'
+        && style.visibility !== 'hidden';
+    });
+
+    const root = visibleNodes[visibleNodes.length - 1];
+    if (!root) {
+      return {
+        hasRoot: false,
+        text: '',
+        hasUploadPrompt: false,
+        hasCaptionBox: false,
+        hasPreviewMedia: false,
+        buttonLabels: [],
+      };
+    }
+
+    const text = root.innerText || '';
+    const buttonLabels = Array.from(root.querySelectorAll('button, [role="button"]'))
+      .map(el => (el.innerText || el.getAttribute('aria-label') || '').trim())
+      .filter(Boolean)
+      .slice(0, 20);
+
+    return {
+      hasRoot: true,
+      text,
+      hasUploadPrompt: /drag photos and videos here|select from computer/i.test(text),
+      hasCaptionBox: Boolean(root.querySelector(
+        'textarea[aria-label*="caption" i], textarea[placeholder*="caption" i], div[aria-label*="Write a caption" i][contenteditable="true"], div[contenteditable="true"][role="textbox"], [role="textbox"][contenteditable="true"]'
+      )),
+      hasPreviewMedia: Boolean(root.querySelector('img, video, canvas')),
+      buttonLabels,
+    };
+  }).catch(() => ({
+    hasRoot: false,
+    text: '',
+    hasUploadPrompt: false,
+    hasCaptionBox: false,
+    hasPreviewMedia: false,
+    buttonLabels: [],
+  }));
+}
+
+async function waitForInstagramComposer(page, timeoutMs = 20000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const root = await getInstagramComposerRoot(page);
+    if (root) return root;
+    await page.waitForTimeout(750);
+  }
+
+  return null;
+}
+
+async function waitForInstagramEditorScreen(page, timeoutMs = 20000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const state = await readInstagramComposerState(page);
+    const hasNext = state.buttonLabels.some(label => /^next$/i.test(label));
+    const hasShare = state.buttonLabels.some(label => /share|post/i.test(label));
+
+    if (state.hasCaptionBox || hasNext || hasShare || (state.hasPreviewMedia && !state.hasUploadPrompt)) {
+      return state;
+    }
+
+    await page.waitForTimeout(1000);
+  }
+
+  return { hasCaptionBox: false, hasUploadPrompt: true, hasNext: false, hasPreviewMedia: false, buttonLabels: [] };
+}
+
 export async function postToInstagramViaBrowser({ caption = '', mediaType = 'image', mediaPaths = [], headless = true }) {
   let username = String(process.env.INSTAGRAM_USERNAME || '').replace(/^@/, '');
   let browser;
   let context;
   let page;
   try {
-    browser = await chromium.launch({
-      headless,
-      slowMo: headless ? 0 : 40,
-    });
+    browser = await chromium.launch(chromiumLaunchOptions(headless));
     context = await browser.newContext();
     const hadCookies = await loadCookies(context);
     page = await context.newPage();
@@ -191,7 +299,7 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
       await saveDebugScreenshot(page, '01b-not-logged-in');
       await browser.close();
       const auth = await authenticateInstagram({ headless: false, manualFallback: true });
-      browser = await chromium.launch({ headless, slowMo: headless ? 0 : 40 });
+      browser = await chromium.launch(chromiumLaunchOptions(headless));
       context = await browser.newContext();
       await loadCookies(context);
       page = await context.newPage();
@@ -284,8 +392,7 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
     let dialogOpened = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       await page.waitForTimeout(2000);
-      dialogOpened = await page.locator('[role="dialog"], [role="presentation"]').first()
-        .isVisible({ timeout: 3000 }).catch(() => false);
+      dialogOpened = Boolean(await waitForInstagramComposer(page, 3000));
       if (dialogOpened) {
         console.log('  [debug] Upload dialog detected');
         break;
@@ -329,6 +436,10 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
     // NOTE: Do NOT call dismissInstagramPrompts here — it would click "Cancel"/"Close"
     // buttons inside the upload dialog, closing it before we can upload files.
     await saveDebugScreenshot(page, '01c-after-create-click');
+    let composerRoot = await waitForInstagramComposer(page, 15000);
+    if (!composerRoot) {
+      throw new Error('Instagram upload dialog opened but the active composer root could not be identified');
+    }
 
     if (mediaPaths.length > 1) {
       console.log(`  [debug] Uploading ${mediaPaths.length} files for carousel via filechooser...`);
@@ -368,46 +479,77 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
 
       await page.waitForTimeout(2000);
     } else {
-      // Wait for the creation dialog to be visible before looking for file input
-      const dialog = page.locator('[role="dialog"], [role="presentation"]').first();
-      await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {
-        console.log('  [debug] No dialog detected, proceeding to look for file input anyway');
-      });
+      let uploaded = false;
 
-      // Try direct file input first, fall back to filechooser event
-      const input = page.locator('input[type="file"]').first();
-      const inputAttached = await input.waitFor({ state: 'attached', timeout: 8000 }).then(() => true).catch(() => false);
-      if (inputAttached) {
-        await input.setInputFiles(mediaPaths);
-      } else {
-        console.log('  [debug] No file input found, trying filechooser event with Select button...');
-        const [fileChooser] = await Promise.all([
-          page.waitForEvent('filechooser', { timeout: 15000 }),
-          (async () => {
-            // Click any visible "Select from computer" / "Select" button in the dialog
-            for (const sel of [
-              'button:has-text("Select from computer")',
-              'button:has-text("Select from your computer")',
-              'button:has-text("Select")',
-              'button:has-text("select from")',
-            ]) {
-              const btn = page.locator(sel).first();
-              if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
-                console.log(`  [debug] Clicking: ${sel}`);
-                await btn.click();
-                return;
-              }
-            }
-            // Last resort: click any blue/primary button in the dialog
-            const primaryBtn = page.locator('[role="dialog"] button, [role="presentation"] button').first();
-            if (await primaryBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-              await primaryBtn.click();
-            }
-          })(),
-        ]);
-        await fileChooser.setFiles(mediaPaths);
+      const composerInput = composerRoot.locator('input[type="file"]').last();
+      if (await composerInput.count().catch(() => 0)) {
+        await composerInput.setInputFiles(mediaPaths);
+        uploaded = true;
+        console.log('  [debug] Uploaded via composer-scoped file input');
       }
+
+      // Prefer the filechooser route inside the active composer because page-level
+      // buttons and inputs can belong to the background feed rather than the post modal.
+      try {
+        if (!uploaded) {
+          const [fileChooser] = await Promise.all([
+            page.waitForEvent('filechooser', { timeout: 12000 }),
+            (async () => {
+              for (const locator of [
+                composerRoot.getByRole('button', { name: /select from computer|select from your computer/i }).first(),
+                composerRoot.locator('button').filter({ hasText: /select from computer|select from your computer/i }).first(),
+                composerRoot.getByText(/select from computer|select from your computer/i).first(),
+              ]) {
+                if (await locator.isVisible({ timeout: 1500 }).catch(() => false)) {
+                  await locator.click();
+                  return;
+                }
+              }
+            })(),
+          ]);
+          await fileChooser.setFiles(mediaPaths);
+          uploaded = true;
+          console.log('  [debug] Uploaded via composer-scoped filechooser');
+        }
+      } catch {
+        console.log('  [debug] Composer filechooser path unavailable, trying direct input...');
+      }
+
+      if (!uploaded) {
+        composerRoot = await waitForInstagramComposer(page, 3000) || composerRoot;
+        const input = composerRoot.locator('input[type="file"]').last();
+        const inputAttached = await input.waitFor({ state: 'attached', timeout: 8000 }).then(() => true).catch(() => false);
+        if (!inputAttached) {
+          throw new Error('Instagram upload failed: no usable file chooser or file input found');
+        }
+        await input.setInputFiles(mediaPaths);
+        console.log('  [debug] Uploaded via fallback composer file input');
+      }
+
       await page.waitForTimeout(mediaType === 'reel' || mediaType === 'video' ? 10000 : 6000);
+
+      const editorState = await waitForInstagramEditorScreen(page, 12000);
+      console.log(`  [debug] Composer buttons after upload: ${editorState.buttonLabels?.join(' | ') || '(none)'}`);
+      const editorHasNext = editorState.buttonLabels?.some(label => /^next$/i.test(label));
+      const editorHasShare = editorState.buttonLabels?.some(label => /share|post/i.test(label));
+      if (editorState.hasUploadPrompt && !editorHasNext && !editorHasShare && !editorState.hasCaptionBox) {
+        const uploadDiagnostics = await page.evaluate(() => {
+          const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [role="presentation"]'));
+          const root = dialogs[dialogs.length - 1] || document;
+          const fileInput = root.querySelector('input[type="file"]') || document.querySelector('input[type="file"]');
+          return {
+            hasSelectedFile: Boolean(fileInput?.files?.length),
+            selectedFileName: fileInput?.files?.[0]?.name || null,
+            loading: !!root.querySelector('[data-visualcompletion="loading-state"]'),
+          };
+        }).catch(() => ({ hasSelectedFile: false, selectedFileName: null, loading: false }));
+
+        if (uploadDiagnostics.hasSelectedFile && uploadDiagnostics.loading) {
+          throw new Error(`Instagram upload stalled after file selection: ${uploadDiagnostics.selectedFileName || 'attached video'} never progressed past the initial modal`);
+        }
+
+        throw new Error('Instagram upload failed: modal stayed on the initial "Select from computer" screen');
+      }
     }
 
     await saveDebugScreenshot(page, '02-after-upload');
@@ -436,9 +578,10 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
     // Click Next/arrow buttons to advance through Crop → Edit → Caption screens
     for (let i = 0; i < 3; i += 1) {
       // Check for "Next" — could be a button, a link, or a styled div/span
-      const nextButton = page.getByRole('button', { name: /next/i }).first();
-      const nextText = page.getByText('Next', { exact: true }).first();
-      const nextLink = page.locator('[role="dialog"] div:has-text("Next"), [role="presentation"] div:has-text("Next")').last();
+      composerRoot = await waitForInstagramComposer(page, 5000) || composerRoot;
+      const nextButton = composerRoot.getByRole('button', { name: /^next$/i }).first();
+      const nextText = composerRoot.getByText('Next', { exact: true }).first();
+      const nextLink = composerRoot.locator('div[role="button"]').filter({ hasText: /^Next$/i }).last();
       let clicked = false;
       for (const btn of [nextButton, nextText, nextLink]) {
         try {
@@ -468,16 +611,47 @@ export async function postToInstagramViaBrowser({ caption = '', mediaType = 'ima
 
     await saveDebugScreenshot(page, '03-after-next');
 
-    const captionBox = page.locator('textarea[aria-label*="caption"], textarea[placeholder*="caption"], div[aria-label*="Write a caption"][contenteditable="true"], div[contenteditable="true"]').first();
-    await captionBox.waitFor({ state: 'visible', timeout: 15000 });
-    await captionBox.click();
-    await captionBox.fill(String(caption || '').slice(0, 2200));
+    const captionSelectors = [
+      'textarea[aria-label*="caption" i]',
+      'textarea[placeholder*="caption" i]',
+      'div[aria-label*="Write a caption" i][contenteditable="true"]',
+      'div[contenteditable="true"][role="textbox"]',
+      '[role="textbox"][contenteditable="true"]',
+      'div[contenteditable="true"]',
+    ];
+
+    let captionFilled = false;
+    for (const selector of captionSelectors) {
+      composerRoot = await waitForInstagramComposer(page, 5000) || composerRoot;
+      const captionBox = composerRoot.locator(selector).first();
+      if (!(await captionBox.isVisible({ timeout: 2500 }).catch(() => false))) {
+        continue;
+      }
+
+      await captionBox.click().catch(() => {});
+      await page.waitForTimeout(300);
+
+      // contenteditable surfaces do not support fill reliably
+      const isMac = process.platform === 'darwin';
+      await page.keyboard.press(isMac ? 'Meta+a' : 'Control+a').catch(() => {});
+      await page.keyboard.press('Backspace').catch(() => {});
+      await page.waitForTimeout(200);
+      await page.keyboard.type(String(caption || '').slice(0, 2200), { delay: 5 });
+      captionFilled = true;
+      console.log(`  [debug] Caption filled via selector: ${selector}`);
+      break;
+    }
+
+    if (!captionFilled) {
+      throw new Error('Instagram caption entry failed: no visible caption input matched current UI');
+    }
     await page.waitForTimeout(1000);
 
     await saveDebugScreenshot(page, '04-before-share');
 
     // Validate share button is visible and enabled before clicking
-    const shareButton = page.getByRole('button', { name: /share|post/i }).first();
+    composerRoot = await waitForInstagramComposer(page, 5000) || composerRoot;
+    const shareButton = composerRoot.getByRole('button', { name: /share|post/i }).first();
     const shareVisible = await shareButton.isVisible({ timeout: 5000 }).catch(() => false);
     if (!shareVisible) {
       await saveDebugScreenshot(page, '04b-share-not-found');

@@ -16,11 +16,26 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { postToXViaBrowser } from './x-browser-post.js';
-import { listScheduledItems, updateScheduledPlatformPost } from '../shared/scheduled-queue.js';
+import {
+  listScheduledPlatformItems,
+  prepareScheduledVideoForPlatform,
+  recordScheduledPlatformFailure,
+  updateScheduledPlatformPost,
+} from '../shared/scheduled-queue.js';
+import { buildShortPostWithPromo } from '../shared/post-promo.js';
+import {
+  assertSpendWithinLimit,
+  estimateXaiChatCompletionCost,
+  estimateXaiChatCompletionMaxCost,
+  extractXaiChatUsageMetadata,
+  recordApiSpend,
+} from '../shared/api-spend-tracker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, '..', '..');
 dotenv.config({ path: path.join(REPO_ROOT, '.env') });
+const PLATFORM = 'x';
+const CHAT_MODEL = 'grok-4-1-fast-non-reasoning';
 
 const BROAD_HASHTAGS = ['#creators', '#marketing', '#video', '#content', '#automation'];
 const NICHE_HASHTAGS = ['#AIVideo', '#CarouselDesign', '#CreativeOps', '#ContentWorkflow', '#SocialContent'];
@@ -40,9 +55,7 @@ async function generateTweetCaption(video) {
   }
 
   try {
-    const res = await axios.post('https://api.x.ai/v1/chat/completions', {
-      model: 'grok-4-1-fast-non-reasoning',
-      messages: [{ role: 'user', content: `You write tweets for a general AI content tool that helps people generate videos and carousels fast.
+    const prompt = `You write tweets for a general AI content tool that helps people generate videos and carousels fast.
 
 CONTENT:
 Video topic: "${video.id}"
@@ -62,7 +75,24 @@ RULES:
 - No emojis, no links
 - Be direct, punchy, and highly shareable
 
-Return ONLY the tweet text. Nothing else.` }],
+Return ONLY the tweet text. Nothing else.`;
+    const messages = [{ role: 'user', content: prompt }];
+    const estimatedCostUsd = estimateXaiChatCompletionMaxCost({
+      model: CHAT_MODEL,
+      messages,
+      maxTokens: 200,
+    });
+
+    assertSpendWithinLimit({
+      provider: 'xai',
+      operation: 'chat.completions',
+      model: CHAT_MODEL,
+      projectedCostUsd: estimatedCostUsd || 0,
+    });
+
+    const res = await axios.post('https://api.x.ai/v1/chat/completions', {
+      model: CHAT_MODEL,
+      messages,
       max_tokens: 200,
       temperature: 0.9,
     }, {
@@ -74,6 +104,21 @@ Return ONLY the tweet text. Nothing else.` }],
 
     let tweet = res.data.choices?.[0]?.message?.content?.trim();
     if (tweet) {
+      recordApiSpend({
+        provider: 'xai',
+        operation: 'chat.completions',
+        model: CHAT_MODEL,
+        costUsd: estimateXaiChatCompletionCost({
+          model: CHAT_MODEL,
+          usage: res.data?.usage,
+        }) || 0,
+        estimatedCostUsd,
+        metadata: {
+          ...extractXaiChatUsageMetadata(res.data),
+          purpose: 'x-video-caption',
+        },
+      });
+
       tweet = tweet.replace(/^["']|["']$/g, '');
       if (tweet.length > 280) tweet = tweet.substring(0, 277) + '...';
       return tweet;
@@ -82,7 +127,7 @@ Return ONLY the tweet text. Nothing else.` }],
     console.log(`  Grok caption failed: ${e.message}`);
   }
 
-  return `${video.id} is ready to post.\n\nWhat should this tool generate next?`;
+  return buildShortPostWithPromo(`${video.id} is ready to post. What should this tool generate next?`);
 }
 
 async function main() {
@@ -95,50 +140,53 @@ async function main() {
   console.log('='.repeat(50));
   console.log();
 
-  const allVideos = listScheduledItems('video');
-  const unposted = allVideos.filter(item => !item.manifest.posts?.x?.permalink);
+  const allVideos = listScheduledPlatformItems('video', PLATFORM);
+  console.log(`Total scheduled ready for X: ${allVideos.length}`);
 
-  console.log(`Total scheduled: ${allVideos.length} | Unposted to X: ${unposted.length}`);
-
-  if (unposted.length === 0) {
+  if (allVideos.length === 0) {
     console.log('\nNo unposted variants!');
     return;
   }
 
-  const item = unposted[0];
+  const item = allVideos[0];
   const video = item.manifest;
-  const videoFilePath = path.join(REPO_ROOT, video.assets.video_path);
   console.log(`\nSelected: ${video.id}`);
-
-  if (!fs.existsSync(videoFilePath)) {
-    console.error(`File not found: ${video.assets.video_path}`);
-    process.exit(1);
-  }
 
   if (dryRun) {
     console.log(`[dry-run] Would post: ${video.assets.video_path}`);
     return;
   }
 
-  // Generate tweet text
-  console.log('Generating caption...');
-  const tweetText = await generateTweetCaption(video);
-  console.log(`  "${tweetText}" (${tweetText.length}/280)`);
+  const prepared = prepareScheduledVideoForPlatform(item, PLATFORM);
+  const videoFilePath = prepared.preparedVideoPath;
+  if (!fs.existsSync(videoFilePath)) {
+    console.error(`File not found: ${path.relative(REPO_ROOT, videoFilePath)}`);
+    process.exit(1);
+  }
 
-  console.log('\nPosting via X browser session...');
-  const result = await postToXViaBrowser({
-    text: tweetText,
-    mediaPaths: [videoFilePath],
-  });
-  const tweetId = result.tweetId;
-  const tweetUrl = result.tweetUrl;
+  try {
+    console.log('Generating caption...');
+    const tweetText = buildShortPostWithPromo(await generateTweetCaption(video));
+    console.log(`  "${tweetText}" (${tweetText.length}/280)`);
 
-  console.log(`\nSUCCESS! ${tweetUrl}`);
-  updateScheduledPlatformPost('video', item.dir, 'x', {
-    post_id: tweetId,
-    permalink: tweetUrl,
-    source_file: video.assets.video_path,
-  });
+    console.log('\nPosting via X browser session...');
+    const result = await postToXViaBrowser({
+      text: tweetText,
+      mediaPaths: [videoFilePath],
+    });
+    const tweetId = result.tweetId;
+    const tweetUrl = result.tweetUrl;
+
+    console.log(`\nSUCCESS! ${tweetUrl}`);
+    updateScheduledPlatformPost('video', item.dir, 'x', {
+      post_id: tweetId,
+      permalink: tweetUrl,
+      source_file: prepared.manifest.queue?.platforms?.[PLATFORM]?.prepared_video_path || video.assets.video_path,
+    });
+  } catch (error) {
+    recordScheduledPlatformFailure('video', item.dir, PLATFORM, error);
+    throw error;
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

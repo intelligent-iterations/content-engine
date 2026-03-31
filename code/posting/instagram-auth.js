@@ -12,6 +12,16 @@ const COOKIE_FILE = path.join(REPO_ROOT, 'cookies', 'instagram_cookies.json');
 
 dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 
+function chromiumLaunchOptions(headless) {
+  const executablePath = fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined;
+  return {
+    headless,
+    slowMo: headless ? 0 : 60,
+    executablePath,
+    args: executablePath ? ['--no-sandbox'] : undefined,
+  };
+}
+
 function getInstagramUsername() {
   return (process.env.INSTAGRAM_USERNAME || '').trim().replace(/^@/, '');
 }
@@ -109,10 +119,7 @@ async function waitForEnter(promptText) {
 }
 
 export async function launchInstagramBrowser({ headless = true } = {}) {
-  return chromium.launch({
-    headless,
-    slowMo: headless ? 0 : 60,
-  });
+  return chromium.launch(chromiumLaunchOptions(headless));
 }
 
 export async function authenticateInstagram({ headless = false, manualFallback = true } = {}) {

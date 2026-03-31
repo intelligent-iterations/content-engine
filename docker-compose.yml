@@ -1,0 +1,48 @@
+services:
+  autopost:
+    build:
+      context: .
+      dockerfile: Dockerfile.autopost
+    image: content-engine-autopost:local
+    working_dir: /app
+    init: true
+    cpus: 2.0
+    mem_limit: 3g
+    shm_size: 1g
+    environment:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      CONTENT_GEN_PYTHON: /usr/bin/python3
+      CONTENT_GEN_DISABLE_BROWSER_SANDBOX: "1"
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./downloads:/app/downloads
+      - ./cookies:/app/cookies
+      - ./auth:/app/auth
+      - ./research:/app/research
+      - ./.env:/app/.env:ro
+
+  generate:
+    build:
+      context: .
+      dockerfile: Dockerfile.generate
+    image: content-engine-generate:local
+    working_dir: /app
+    init: true
+    cpus: 2.0
+    mem_limit: 4g
+    shm_size: 1g
+    environment:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+      CONTENT_GEN_PYTHON: /usr/bin/python3
+      CONTENT_GEN_DISABLE_BROWSER_SANDBOX: "1"
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./downloads:/app/downloads
+      - ./cookies:/app/cookies
+      - ./auth:/app/auth
+      - ./research:/app/research
+      - ./.env:/app/.env:ro

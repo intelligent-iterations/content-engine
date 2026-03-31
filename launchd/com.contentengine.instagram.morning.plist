@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.contentengine.instagram.morning</string>
+  <key>WorkingDirectory</key>
+  <string>/Users/admin/content-engine</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>/Users/admin/content-engine/scripts/docker-slot.sh</string>
+    <string>instagram</string>
+    <string>morning</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>8</integer>
+    <key>Minute</key>
+    <integer>20</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/admin/content-engine/output/logs/instagram-morning.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/admin/content-engine/output/logs/instagram-morning.log</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

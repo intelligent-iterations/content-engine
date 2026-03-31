@@ -48,9 +48,12 @@ function isValidFolder(folderName) {
  * Main auto-post function
  */
 async function autoPostToX() {
+  const dryRun = process.argv.includes('--dry-run');
+
   console.log('='.repeat(50));
   console.log('  X (Twitter) Auto-Poster');
   console.log('  ' + new Date().toISOString());
+  if (dryRun) console.log('  ** DRY RUN **');
   console.log('='.repeat(50));
   console.log();
 
@@ -80,6 +83,11 @@ async function autoPostToX() {
 
   console.log(`Selected: ${selectedFolder.manifest.id}`);
   console.log();
+
+  if (dryRun) {
+    console.log(`[dry-run] Would post carousel folder: ${selectedFolder.dir}`);
+    return { success: true, dryRun: true, folder: selectedFolder.manifest.id };
+  }
 
   // Post to X
   console.log('Posting to X...');

@@ -12,6 +12,7 @@ import {
   makeTempChromeProfileDir,
   parseCookieFile
 } from '../shared/grok-browser-session.js';
+import { ensureAuthenticatedGrokSession } from '../shared/grok-web-auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +55,15 @@ const ACTION_BUTTON_SELECTOR_CANDIDATES = [
   'button[type="submit"]'
 ];
 
+const REFERENCE_IMAGE_BUTTON_LABELS = [
+  /upload/i,
+  /add image/i,
+  /reference/i,
+  /attach/i,
+  /image/i,
+  /^\+$/i
+];
+
 function printUsage() {
   console.log(`
 Usage:
@@ -66,6 +76,7 @@ Options:
   --state <path>             Playwright storage state path
   --cookies <path>           Import cookies JSON before running
   --out-dir <path>           Directory for downloaded images
+  --reference-image <path>   Local image file to attach before generating, repeatable
   --user-data-dir <path>     Persistent Chrome profile directory
   --timeout-ms <number>      Max wait time for image generation
   --headed                   Run with visible browser
@@ -87,6 +98,7 @@ function parseArgs(argv) {
     timeoutMs: DEFAULT_TIMEOUT_MS,
     rateLimitWaitMs: DEFAULT_RATE_LIMIT_WAIT_MS,
     maxRateLimitRetries: DEFAULT_MAX_RATE_LIMIT_RETRIES,
+    referenceImagePaths: [],
     headed: false,
     debug: false,
     saveLogin: false,
@@ -125,6 +137,11 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg.startsWith('--out-dir=')) {
       args.outDir = arg.slice('--out-dir='.length);
+    } else if (arg === '--reference-image') {
+      args.referenceImagePaths.push(argv[i + 1]);
+      i += 1;
+    } else if (arg.startsWith('--reference-image=')) {
+      args.referenceImagePaths.push(arg.slice('--reference-image='.length));
     } else if (arg === '--user-data-dir') {
       args.userDataDir = argv[i + 1];
       i += 1;
@@ -202,6 +219,31 @@ function resolveCookiePath(providedPath) {
   return DEFAULT_COOKIE_PATH_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
+function resolvePlaywrightLaunchOptions(args) {
+  const launchOptions = {
+    headless: !args.headed,
+    acceptDownloads: true,
+    downloadsPath: args.outDir,
+    viewport: { width: 1440, height: 1080 },
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+  };
+
+  const executableCandidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser'
+  ].filter(Boolean);
+
+  const executablePath = executableCandidates.find((candidate) => fs.existsSync(candidate));
+  if (executablePath) {
+    launchOptions.executablePath = executablePath;
+  } else {
+    launchOptions.channel = 'chrome';
+  }
+
+  return launchOptions;
+}
+
 async function applyCookiesToContext(context, args) {
   await applyStorageStateToContext(context, args.statePath);
   await applyCookiesFileToContext(context, resolveCookiePath(args.cookiesPath));
@@ -214,14 +256,7 @@ async function launchPersistentChrome(args) {
     : args.userDataDir;
 
   ensureDir(userDataDir);
-  const launchOptions = {
-    headless: !args.headed,
-    channel: 'chrome',
-    acceptDownloads: true,
-    downloadsPath: args.outDir,
-    viewport: { width: 1440, height: 1080 },
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-  };
+  const launchOptions = resolvePlaywrightLaunchOptions(args);
 
   try {
     return await chromium.launchPersistentContext(userDataDir, launchOptions);
@@ -343,21 +378,6 @@ async function ensureImageMode(page, debug) {
   logDebug(debug, `Switched to Image mode; class=${nextClass || 'n/a'}`);
 }
 
-async function assertLoggedIn(page) {
-  const href = page.url();
-  if (/\/i\/flow\/login|\/login\b/i.test(href)) {
-    throw new Error('Not logged in to Grok. Save a storage state first with --save-login or provide valid cookies.');
-  }
-
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const lowered = bodyText.toLowerCase();
-  const hasLoginWall = lowered.includes('sign in to grok') || lowered.includes('log in to grok') || lowered.includes('continue with google');
-
-  if (hasLoginWall) {
-    throw new Error('Not logged in to Grok. Save a storage state first with --save-login or provide valid cookies.');
-  }
-}
-
 async function findVisiblePromptLocator(page) {
   const hydratedEditor = page.locator('[contenteditable="true"].ProseMirror').filter({ visible: true }).first();
   try {
@@ -412,6 +432,67 @@ async function fillPrompt(locator, prompt, debug) {
   }
 
   throw new Error('Unsupported prompt input type');
+}
+
+async function attachReferenceImages(page, imagePaths, debug) {
+  if (!Array.isArray(imagePaths) || imagePaths.length === 0) {
+    return;
+  }
+
+  const resolvedPaths = imagePaths.map((imagePath) => path.resolve(imagePath));
+  const fileInputs = page.locator('input[type="file"]');
+  const fileInputCount = await fileInputs.count().catch(() => 0);
+  let attachedPaths = [];
+
+  for (let i = 0; i < fileInputCount; i += 1) {
+    const input = fileInputs.nth(i);
+    try {
+      const supportsMultiple = await input.evaluate((node) => node.hasAttribute('multiple')).catch(() => false);
+      attachedPaths = supportsMultiple ? [...resolvedPaths] : [resolvedPaths[0]];
+      await input.setInputFiles(attachedPaths);
+      await page.waitForTimeout(1500);
+      logDebug(debug, `Attached ${attachedPaths.length} reference image(s) via file input`);
+
+      if (supportsMultiple || resolvedPaths.length === 1) {
+        return;
+      }
+
+      break;
+    } catch {
+      // Try next input or button-driven chooser.
+    }
+  }
+
+  for (const resolvedPath of resolvedPaths.slice(attachedPaths.length)) {
+    let attached = false;
+
+    for (const label of REFERENCE_IMAGE_BUTTON_LABELS) {
+      const button = page.getByRole('button', { name: label }).first();
+
+      try {
+        await button.waitFor({ state: 'visible', timeout: 1000 });
+        const chooserPromise = page.waitForEvent('filechooser', { timeout: 2000 });
+        await button.click({ force: true });
+        const chooser = await chooserPromise;
+        await chooser.setFiles(resolvedPath);
+        await page.waitForTimeout(1500);
+        logDebug(debug, `Attached reference image via file chooser: ${resolvedPath}`);
+        attached = true;
+        attachedPaths.push(resolvedPath);
+        break;
+      } catch {
+        // Try next label.
+      }
+    }
+
+    if (!attached) {
+      throw new Error(`Could not attach reference image: ${resolvedPath}`);
+    }
+  }
+
+  if (attachedPaths.length < resolvedPaths.length) {
+    throw new Error('Could not find a file input or upload control for image reference input');
+  }
 }
 
 async function findActionButton(page) {
@@ -470,8 +551,72 @@ async function submitPrompt(page, promptLocator, debug) {
 }
 
 async function detectErrorState(page) {
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const lowered = bodyText.toLowerCase();
+  const visibleDialogText = await page.evaluate(() => {
+    const selectors = [
+      '[role="dialog"]',
+      '[aria-modal="true"]',
+      '[data-radix-dialog-content]',
+      '[data-state="open"][role="dialog"]'
+    ];
+
+    const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const texts = [];
+
+    for (const node of nodes) {
+      const text = (node.textContent || '').trim();
+      if (!text) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      texts.push(text);
+    }
+
+    return texts.join('\n');
+  }).catch(() => '');
+
+  const loweredDialog = visibleDialogText.toLowerCase();
+  if (
+    page.url().includes('#subscribe')
+    || (
+      loweredDialog.includes('supergrok')
+      && (
+        loweredDialog.includes('claim free offer')
+        || loweredDialog.includes('try free for 3 days')
+        || loweredDialog.includes('upgrade to lite')
+      )
+    )
+  ) {
+    return 'Grok browser submit opened the SuperGrok subscribe modal instead of starting image generation.';
+  }
+
+  const visibleErrorText = await page.evaluate(() => {
+    const selectors = [
+      '[role="alert"]',
+      '[role="status"]',
+      '[role="dialog"]',
+      '[data-sonner-toast]',
+      '[data-radix-toast-viewport]',
+      '[aria-live="assertive"]',
+      '[aria-live="polite"]'
+    ];
+
+    const nodes = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+    const texts = [];
+
+    for (const node of nodes) {
+      const text = (node.textContent || '').trim();
+      if (!text) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      texts.push(text);
+    }
+
+    return texts.join('\n');
+  }).catch(() => '');
+
+  const fallbackBodyText = visibleErrorText
+    ? visibleErrorText
+    : await page.locator('body').innerText().catch(() => '');
+  const lowered = fallbackBodyText.toLowerCase();
 
   if (lowered.includes('content moderated') || lowered.includes('try a different idea')) {
     return 'Grok rejected the prompt due to moderation';
@@ -485,23 +630,16 @@ async function detectErrorState(page) {
     return 'Grok reported a generation failure';
   }
 
-  const upsellPatterns = [
-    'upgrade to supergrok',
-    'upgrade to grok plus',
-    'subscribe to grok',
-    'supergrok plan',
-    'grok plus plan',
-    'unlock more',
-    'get more generations',
+  const hardLimitPatterns = [
     'generation limit reached',
-    'limit reached',
     'you\'ve reached your limit',
-    'upgrade your plan',
-    'upgrade now',
-    'go premium',
+    'you have reached your limit',
+    'get more generations',
+    'daily limit reached',
+    'monthly limit reached'
   ];
 
-  if (upsellPatterns.some((pattern) => lowered.includes(pattern))) {
+  if (hardLimitPatterns.some((pattern) => lowered.includes(pattern))) {
     return 'Grok free-tier limit reached (upgrade/subscription upsell detected). Use XAI_API_KEY or wait for the limit to reset.';
   }
 
@@ -608,7 +746,16 @@ async function collectKnownPublicAssetUrls(page) {
   });
 }
 
-async function resolvePromptSection(page, prompt, debug) {
+async function collectKnownSectionIds(page) {
+  return page.evaluate(() => (
+    Array.from(document.querySelectorAll('[id^="imagine-masonry-section-"]'))
+      .map((node) => node.id)
+      .filter(Boolean)
+  ));
+}
+
+async function resolvePromptSection(page, prompt, debug, options = {}) {
+  const allowFallback = options.allowFallback !== false;
   const target = normalizePromptText(prompt);
   const locator = page.locator('[id^="imagine-masonry-section-"]').filter({
     has: page.locator('span')
@@ -624,16 +771,55 @@ async function resolvePromptSection(page, prompt, debug) {
     }
   }
 
+  if (!allowFallback) {
+    logDebug(debug, `No prompt section match for "${prompt}" yet`);
+    return null;
+  }
+
   logDebug(debug, `No exact prompt section match for "${prompt}", using latest section`);
   return locator.first();
 }
 
+async function extractSectionImageMetadata(section) {
+  return section.evaluate((node) => {
+    const normalizeUrl = (value) => {
+      if (!value) return '';
+      if (value.startsWith('//')) return `${location.protocol}${value}`;
+      if (value.startsWith('/')) return `${location.origin}${value}`;
+      return value;
+    };
 
-async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interceptedJobIds = []) {
+    const imageUrls = Array.from(node.querySelectorAll('img'))
+      .map((img) => ({
+        src: normalizeUrl(img.currentSrc || img.src || ''),
+        width: img.naturalWidth || img.width || 0,
+        height: img.naturalHeight || img.height || 0
+      }))
+      .filter((img) => img.src)
+      .sort((a, b) => (b.width * b.height) - (a.width * a.height));
+
+    const downloadLinks = Array.from(node.querySelectorAll('a[href], a[download]'))
+      .map((link) => ({
+        href: normalizeUrl(link.getAttribute('href') || ''),
+        text: (link.textContent || link.getAttribute('aria-label') || '').trim()
+      }))
+      .filter((link) => link.href);
+
+    return {
+      currentUrl: location.href,
+      sectionId: node.id || '',
+      metaUrls: [],
+      imageUrls,
+      downloadLinks
+    };
+  });
+}
+
+
+async function waitForGeneration(page, timeoutMs, debug, initialMetadata, knownSectionIds = [], interceptedJobIds = [], completedJobIds = [], prompt = '') {
   const deadline = Date.now() + timeoutMs;
   let sawProgress = false;
   const knownUrls = collectKnownMediaUrls(initialMetadata);
-  const knownPublicAssetUrls = new Set(await collectKnownPublicAssetUrls(page).catch(() => []));
 
   // Grok shows a compressed data URL preview (~31KB) on the main page.
   // The full-quality image is only on the /imagine/post/{jobId} page,
@@ -655,29 +841,31 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
       throw new Error(error);
     }
 
-    // PATH 1: Check for CDN public asset URLs (best quality)
-    const publicAssetUrls = await collectKnownPublicAssetUrls(page).catch(() => []);
-    const newPublicAssetUrl = publicAssetUrls.find((url) => !knownPublicAssetUrls.has(url)) || null;
-    if (newPublicAssetUrl) {
-      logDebug(debug, `Public asset CDN URL detected: ${newPublicAssetUrl}`);
-      return {
-        directUrl: newPublicAssetUrl,
-        metadata: await extractImageMetadata(page).catch(() => initialMetadata)
-      };
-    }
+    const currentSectionIds = await collectKnownSectionIds(page).catch(() => []);
+    const newestSectionId = currentSectionIds.find((id) => !knownSectionIds.includes(id)) || null;
+    const promptSection = newestSectionId
+      ? page.locator(`#${newestSectionId}`).first()
+      : (prompt
+        ? await resolvePromptSection(page, prompt, debug, { allowFallback: false }).catch(() => null)
+        : null);
+    const promptSectionMetadata = promptSection
+      ? await extractSectionImageMetadata(promptSection).catch(() => null)
+      : null;
+    const pageMetadata = await extractImageMetadata(page);
 
-    // PATH 2: Check for new direct image URLs
-    const metadata = await extractImageMetadata(page);
-    const directUrl = chooseDirectImageUrl({
-      ...metadata,
-      metaUrls: metadata.metaUrls.filter((url) => !knownUrls.has(url)),
-      imageUrls: metadata.imageUrls.filter((img) => !knownUrls.has(img.src)),
-      downloadLinks: metadata.downloadLinks.filter((link) => !knownUrls.has(link.href))
-    });
+    // PATH 2: Check for new direct image URLs in the prompt-matched section only.
+    const directUrl = promptSectionMetadata
+      ? chooseDirectImageUrl({
+        ...promptSectionMetadata,
+        metaUrls: promptSectionMetadata.metaUrls.filter((url) => !knownUrls.has(url)),
+        imageUrls: promptSectionMetadata.imageUrls.filter((img) => !knownUrls.has(img.src)),
+        downloadLinks: promptSectionMetadata.downloadLinks.filter((link) => !knownUrls.has(link.href))
+      })
+      : null;
 
     if (directUrl) {
       if (/^data:image\//i.test(directUrl)) {
-        const matchingImg = metadata.imageUrls.find((img) => img.src === directUrl);
+        const matchingImg = promptSectionMetadata?.imageUrls.find((img) => img.src === directUrl);
         const imgMaxDim = matchingImg ? Math.max(matchingImg.width, matchingImg.height) : 0;
 
         if (imgMaxDim >= MIN_IMAGE_DIMENSION && !previewDetected) {
@@ -689,32 +877,12 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
           // in headless mode).
           if (interceptedJobIds.length > 0) {
             logDebug(debug, `Have ${interceptedJobIds.length} job IDs — navigating to post page for full-res image`);
-            return { directUrl, metadata };
+            return { directUrl, metadata: pageMetadata };
           }
         }
       } else {
         logDebug(debug, `Direct HTTP image URL detected: ${directUrl}`);
-        return { directUrl, metadata };
-      }
-    }
-
-    // PATH 3: Check image selector candidates for HTTP URLs
-    for (const selector of IMAGE_SELECTOR_CANDIDATES) {
-      const image = page.locator(selector).filter({ visible: true }).first();
-      try {
-        if (await image.isVisible({ timeout: 500 })) {
-          const imgData = await image.evaluate((node) => ({
-            src: node.currentSrc || node.src || '',
-            width: node.naturalWidth || 0,
-            height: node.naturalHeight || 0
-          }));
-          if (imgData.src && !knownUrls.has(imgData.src) && /^https?:/i.test(imgData.src)) {
-            logDebug(debug, `Image element HTTP source detected: ${imgData.src} (${imgData.width}x${imgData.height})`);
-            return { directUrl: imgData.src, metadata };
-          }
-        }
-      } catch {
-        // Ignore and continue polling.
+        return { directUrl, metadata: pageMetadata };
       }
     }
 
@@ -722,10 +890,21 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
     if (previewDetected && interceptedJobIds.length > 0) {
       logDebug(debug, 'Preview + job IDs ready — returning for post-page navigation');
       const lastMetadata = await extractImageMetadata(page).catch(() => initialMetadata);
-      const lastDirectUrl = chooseDirectImageUrl(lastMetadata);
+      const lastDirectUrl = promptSectionMetadata
+        ? chooseDirectImageUrl(promptSectionMetadata)
+        : null;
       if (lastDirectUrl) {
-        return { directUrl: lastDirectUrl, metadata: lastMetadata };
+        return { directUrl: lastDirectUrl, metadata: lastMetadata, jobIds: [...interceptedJobIds] };
       }
+    }
+
+    if (completedJobIds.length > 0) {
+      logDebug(debug, `Completed image job detected via websocket: ${completedJobIds[0]}`);
+      return {
+        directUrl: null,
+        metadata: pageMetadata,
+        jobIds: [...completedJobIds],
+      };
     }
 
     const progressButton = page.locator('button[aria-label*="Options"]').first();
@@ -744,7 +923,7 @@ async function waitForGeneration(page, timeoutMs, debug, initialMetadata, interc
 }
 
 async function downloadViaButton(page, outputPath, debug, options = {}) {
-  const section = await resolvePromptSection(page, options.prompt, debug).catch(() => null);
+  const section = await resolvePromptSection(page, options.prompt, debug, { allowFallback: false }).catch(() => null);
   if (!section) {
     return null;
   }
@@ -911,7 +1090,7 @@ function inferImageExtension(url) {
 }
 
 async function runPrompt(args) {
-  const context = await launchPersistentChrome({ ...args, preferFreshProfile: !args.headed });
+  const context = await launchPersistentChrome(args);
   await applyCookiesToContext(context, args);
   const page = context.pages()[0] || await context.newPage();
 
@@ -924,10 +1103,15 @@ async function runPrompt(args) {
     let attempt = 0;
     while (attempt <= args.maxRateLimitRetries) {
       await page.goto(GROK_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await dismissInterruptions(page, args.debug);
+      await ensureAuthenticatedGrokSession(page, context, {
+        debug: args.debug,
+        statePath: args.statePath,
+      });
       await waitForEditorToHydrate(page, args.debug);
       await dismissInterruptions(page, args.debug);
-      await assertLoggedIn(page);
       await ensureImageMode(page, args.debug);
+      await attachReferenceImages(page, args.referenceImagePaths, args.debug);
 
       const promptInput = await findVisiblePromptLocator(page);
       await fillPrompt(promptInput, args.prompt, args.debug);
@@ -941,8 +1125,10 @@ async function runPrompt(args) {
       // Grok Imagine uses WebSocket (wss://grok.com/ws/imagine/listen) for
       // generation. Completion frames contain CDN image URLs.
       const baselinePublicUrls = new Set(await collectKnownPublicAssetUrls(page).catch(() => []));
+      const baselineSectionIds = await collectKnownSectionIds(page).catch(() => []);
       const interceptedCdnUrls = [];
       const interceptedJobIds = [];
+      const completedJobIds = [];
 
       const cdpSession = await page.context().newCDPSession(page);
       await cdpSession.send('Network.enable');
@@ -960,6 +1146,12 @@ async function runPrompt(args) {
           if (frame.job_id && !interceptedJobIds.includes(frame.job_id)) {
             interceptedJobIds.push(frame.job_id);
             logDebug(args.debug, `WS job: ${frame.job_id} status=${frame.current_status}`);
+          }
+
+          const status = String(frame.current_status || frame.status || '').toLowerCase();
+          if (frame.job_id && /(complete|completed|done|success|succeeded|finished|ready)/i.test(status) && !completedJobIds.includes(frame.job_id)) {
+            completedJobIds.push(frame.job_id);
+            logDebug(args.debug, `WS completed image job: ${frame.job_id} status=${status}`);
           }
 
           // Look for CDN URLs in any field
@@ -1007,12 +1199,12 @@ async function runPrompt(args) {
       await submitPrompt(page, promptInput, args.debug);
 
       try {
-        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata, interceptedJobIds);
+        result = await waitForGeneration(page, args.timeoutMs, args.debug, initialMetadata, baselineSectionIds, interceptedJobIds, completedJobIds, args.prompt);
 
         // Try to upgrade from data URL preview to full-res CDN image.
         // The WS-intercepted /images/{jobId} CDN URLs are the exact generated
         // images. In-page fetch fails (CORS), but context.request bypasses CORS.
-        if (/^data:/.test(result.directUrl || '') && interceptedJobIds.length > 0) {
+        if ((!result.directUrl || /^data:/.test(result.directUrl || '')) && interceptedJobIds.length > 0) {
           // Wait a moment for remaining WS CDN URLs to arrive
           await page.waitForTimeout(5000);
 
@@ -1150,6 +1342,12 @@ async function main() {
     if (args.saveLogin) {
       await saveLoginState(args);
       return;
+    }
+
+    for (const referenceImagePath of args.referenceImagePaths) {
+      if (!fs.existsSync(referenceImagePath)) {
+        throw new Error(`Reference image not found: ${referenceImagePath}`);
+      }
     }
 
     await runPrompt(args);

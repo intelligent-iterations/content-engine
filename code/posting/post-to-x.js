@@ -14,6 +14,13 @@ import dotenv from 'dotenv';
 import { postToXViaBrowser } from './x-browser-post.js';
 import { SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
 import { resolveScheduledItem, updateScheduledPlatformPost } from '../shared/scheduled-queue.js';
+import {
+  assertSpendWithinLimit,
+  estimateXaiChatCompletionCost,
+  estimateXaiChatCompletionMaxCost,
+  extractXaiChatUsageMetadata,
+  recordApiSpend,
+} from '../shared/api-spend-tracker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, '..', '..');
@@ -22,6 +29,7 @@ dotenv.config({ path: path.join(REPO_ROOT, '.env') });
 // --- HASHTAG POOLS (rotate to avoid repetition penalty) ---
 const BROAD_HASHTAGS = ['#creators', '#marketing', '#content', '#video', '#automation', '#socialmedia', '#creative'];
 const NICHE_HASHTAGS = ['#AICreator', '#ContentWorkflow', '#CarouselDesign', '#AIVideo', '#CreativeOps', '#Storytelling', '#ContentSystem'];
+const CHAT_MODEL = 'grok-4-1-fast-non-reasoning';
 
 /**
  * Pick 1-2 hashtags: 1 broad + 1 niche, rotated based on day
@@ -73,11 +81,24 @@ RULES:
 - The question at the end should make people WANT to reply
 
 Return ONLY the tweet text with line breaks. Nothing else.`;
+  const messages = [{ role: 'user', content: prompt }];
+  const estimatedCostUsd = estimateXaiChatCompletionMaxCost({
+    model: CHAT_MODEL,
+    messages,
+    maxTokens: 200,
+  });
 
   try {
+    assertSpendWithinLimit({
+      provider: 'xai',
+      operation: 'chat.completions',
+      model: CHAT_MODEL,
+      projectedCostUsd: estimatedCostUsd || 0,
+    });
+
     const res = await axios.post('https://api.x.ai/v1/chat/completions', {
-      model: 'grok-4-1-fast-non-reasoning',
-      messages: [{ role: 'user', content: prompt }],
+      model: CHAT_MODEL,
+      messages,
       max_tokens: 200,
       temperature: 0.9,
     }, {
@@ -89,6 +110,21 @@ Return ONLY the tweet text with line breaks. Nothing else.`;
 
     let tweet = res.data.choices?.[0]?.message?.content?.trim();
     if (!tweet) throw new Error('Empty response');
+
+    recordApiSpend({
+      provider: 'xai',
+      operation: 'chat.completions',
+      model: CHAT_MODEL,
+      costUsd: estimateXaiChatCompletionCost({
+        model: CHAT_MODEL,
+        usage: res.data?.usage,
+      }) || 0,
+      estimatedCostUsd,
+      metadata: {
+        ...extractXaiChatUsageMetadata(res.data),
+        purpose: 'x-caption',
+      },
+    });
 
     // Strip any quotes Grok might wrap it in
     tweet = tweet.replace(/^["']|["']$/g, '');

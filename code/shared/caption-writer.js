@@ -1,3 +1,5 @@
+import { DEFAULT_POST_PROMO_LINE } from './post-promo.js';
+
 const DEFAULT_MIN_CAPTION_CHARS = 2100;
 const DEFAULT_MAX_CAPTION_CHARS = 2200;
 const DEFAULT_HASHTAG_COUNT = 5;
@@ -251,6 +253,7 @@ export function buildCarouselCaption({
   ]).slice(0, 6);
 
   const paragraphs = [
+    DEFAULT_POST_PROMO_LINE,
     toSentence(`${hook} This carousel is a practical guide to ${topic.toLowerCase()}, written so someone can save it, come back later, and still understand the full flow without rereading a long recipe post`),
     toSentence(`The short version is simple: this post shows the order, texture cues, and key details that matter most. Instead of vague food-content filler, it walks through the process in a way that is easier to follow on a phone. If you are looking for ${usefulTerms || topic.toLowerCase()}, the goal is to make the process feel clear and repeatable`),
     stepSummary.join(' '),
@@ -289,7 +292,6 @@ export function buildVideoCaption({
   topic,
   clips = [],
   template = {},
-  seedCaption = '',
   minChars = DEFAULT_MIN_CAPTION_CHARS,
   maxChars = DEFAULT_MAX_CAPTION_CHARS,
 }) {
@@ -301,12 +303,10 @@ export function buildVideoCaption({
     extras: clipSummary
   });
   const seoPhrases = buildSeoPhrases(cleanTopic, clipSummary);
-  const seed = cleanText(seedCaption);
-  const hookLine = seed
-    ? toSentence(seed.split('\n')[0])
-    : toSentence(`This reel is built around ${cleanTopic.toLowerCase()} and is written to be searchable, specific, and easy to reshare`);
+  const hookLine = toSentence(`This reel is built around ${cleanTopic.toLowerCase()} and is written to be searchable, specific, and easy to reshare`);
 
   const bodyParagraphs = [
+    DEFAULT_POST_PROMO_LINE,
     hookLine,
     toSentence(`If you searched for ${cleanTopic.toLowerCase()}, this caption is meant to work harder than a generic teaser. It is here to reinforce the topic, describe the payoff in plain language, and give the post enough useful context to perform better across TikTok, Reels, and short-form search`),
     clipSummary.length
@@ -317,10 +317,6 @@ export function buildVideoCaption({
     toSentence(`A strong reel caption should help with discovery, retention, and saves at the same time. It should front-load the hook, reinforce the payoff, add context the visuals do not have room to say, and still end with a clear action for the audience`),
     toSentence(`Save this if you want a quick reference, send it to someone who would care about ${cleanTopic.toLowerCase()}, and use it as a reminder that stronger captions are not just decoration. They help the post index for the right phrases and give the viewer a reason to come back`)
   ];
-
-  if (seed) {
-    bodyParagraphs.splice(1, 0, toSentence(`Original caption angle: ${seed}`));
-  }
 
   const expanded = padParagraphsToMinimum(bodyParagraphs, minChars, (index) => (
     `Search-friendly expansion ${index - bodyParagraphs.length + 1}: ${seoPhrases[index % seoPhrases.length]} ` +

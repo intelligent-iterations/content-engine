@@ -6,7 +6,13 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 import { AUTH_DIR, ROOT_DIR, TEMP_DIR } from '../core/paths.js';
+import {
+  assertSpendWithinLimit,
+  estimateXaiImageCost,
+  recordApiSpend,
+} from './api-spend-tracker.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,20 +22,277 @@ const RATE_LIMIT_WAIT = 5000; // 5 seconds between requests
 const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
+const DEFAULT_X_COOKIES_PATH = path.join(ROOT_DIR, 'cookies', 'x_cookies.json');
 const DEFAULT_BROWSER_IMAGE_DOWNLOAD_DIR = path.join(TEMP_DIR, 'grok-images');
 
 export const IMAGE_MODELS = {
   grok: 'grok'
 };
 
+function envFlagEnabled(value) {
+  return String(value || '').trim().toLowerCase() === 'true';
+}
+
+export function isBrowserOverrideEnabled() {
+  return envFlagEnabled(process.env.BROWSER_OVERRIDE);
+}
+
+function shouldAllowLetterCharacters(prompt, options = {}) {
+  if (options.allowLetterCharacters) {
+    return true;
+  }
+
+  const text = String(prompt || '').toLowerCase();
+  return /anthropomorphic\s+(capital\s+)?[a-z]\b/.test(text)
+    || text.includes('anthropomorphic alphabet')
+    || text.includes('alphabet drama')
+    || text.includes('letterform');
+}
+
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 0) {
-  const { referenceImage, aspectRatio, resolution } = options;
+export function detectMimeTypeFromBuffer(buffer) {
+  if (!buffer || buffer.length < 12) {
+    return 'image/jpeg';
+  }
 
-  if (referenceImage) {
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return 'image/png';
+  }
+
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+
+  if (
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46
+    && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+
+  return 'image/jpeg';
+}
+
+export function parseAspectRatio(aspectRatio = '9:16') {
+  const match = String(aspectRatio || '').trim().match(/^(\d+)\s*:\s*(\d+)$/);
+  if (!match) {
+    return { width: 9, height: 16 };
+  }
+
+  return {
+    width: Number(match[1]) || 9,
+    height: Number(match[2]) || 16,
+  };
+}
+
+export function resolveTargetImageSize(aspectRatio = '9:16', resolution = '720p') {
+  const ratio = parseAspectRatio(aspectRatio);
+  const shortSide = String(resolution || '').includes('1080') ? 1080 : 720;
+
+  if (ratio.width <= ratio.height) {
+    return {
+      width: shortSide,
+      height: Math.round(shortSide * (ratio.height / ratio.width)),
+    };
+  }
+
+  return {
+    width: Math.round(shortSide * (ratio.width / ratio.height)),
+    height: shortSide,
+  };
+}
+
+function normalizeImageResolution(resolution = '') {
+  const value = String(resolution || '').trim().toLowerCase();
+  if (!value) {
+    return null;
+  }
+
+  if (value === '1k' || value === '2k') {
+    return value;
+  }
+
+  if (value.includes('1080') || value.includes('2k')) {
+    return '2k';
+  }
+
+  return '1k';
+}
+
+function aspectDelta(width, height, targetWidth, targetHeight) {
+  const sourceRatio = width / height;
+  const targetRatio = targetWidth / targetHeight;
+  return Math.abs(sourceRatio - targetRatio);
+}
+
+async function averageBackgroundColor(buffer) {
+  const { data } = await sharp(buffer)
+    .resize(1, 1, { fit: 'cover' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  return {
+    r: data[0] ?? 16,
+    g: data[1] ?? 16,
+    b: data[2] ?? 16,
+    alpha: 1,
+  };
+}
+
+export async function padImageBufferToAspectRatio(buffer, options = {}) {
+  const {
+    aspectRatio = '9:16',
+    resolution = '720p',
+    outputFormat = 'png',
+  } = options;
+
+  const metadata = await sharp(buffer).metadata();
+  const sourceWidth = Number(metadata.width) || 0;
+  const sourceHeight = Number(metadata.height) || 0;
+  if (!sourceWidth || !sourceHeight) {
+    return buffer;
+  }
+
+  const { width: targetWidth, height: targetHeight } = resolveTargetImageSize(aspectRatio, resolution);
+  if (aspectDelta(sourceWidth, sourceHeight, targetWidth, targetHeight) < 0.01) {
+    if (outputFormat === 'jpeg') {
+      return sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+    }
+    if (outputFormat === 'webp') {
+      return sharp(buffer).webp().toBuffer();
+    }
+    return sharp(buffer).png().toBuffer();
+  }
+
+  const background = await averageBackgroundColor(buffer);
+  const foreground = await sharp(buffer)
+    .resize(targetWidth, targetHeight, {
+      fit: 'contain',
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png()
+    .toBuffer();
+
+  let pipeline = sharp({
+    create: {
+      width: targetWidth,
+      height: targetHeight,
+      channels: 4,
+      background,
+    },
+  }).composite([{ input: foreground }]);
+
+  if (outputFormat === 'jpeg') {
+    pipeline = pipeline.jpeg({ quality: 95 });
+  } else if (outputFormat === 'webp') {
+    pipeline = pipeline.webp();
+  } else {
+    pipeline = pipeline.png();
+  }
+
+  return pipeline.toBuffer();
+}
+
+export async function normalizeImageBufferForOutputPath(buffer, outputPath) {
+  const ext = path.extname(String(outputPath || '')).toLowerCase();
+  const sourceMimeType = detectMimeTypeFromBuffer(buffer);
+
+  if (ext === '.png') {
+    if (sourceMimeType === 'image/png') {
+      return buffer;
+    }
+    return sharp(buffer).png().toBuffer();
+  }
+
+  if (ext === '.webp') {
+    if (sourceMimeType === 'image/webp') {
+      return buffer;
+    }
+    return sharp(buffer).webp().toBuffer();
+  }
+
+  if (ext === '.jpg' || ext === '.jpeg') {
+    if (sourceMimeType === 'image/jpeg') {
+      return buffer;
+    }
+    return sharp(buffer).jpeg({ quality: 95 }).toBuffer();
+  }
+
+  return buffer;
+}
+
+function normalizeReferenceImages(referenceImages) {
+  const inputs = Array.isArray(referenceImages)
+    ? referenceImages
+    : (referenceImages ? [referenceImages] : []);
+
+  const normalized = [];
+  for (const referenceImage of inputs) {
+    if (!referenceImage) {
+      continue;
+    }
+
+    if (Buffer.isBuffer(referenceImage)) {
+      normalized.push({
+        buffer: referenceImage,
+        mimeType: detectMimeTypeFromBuffer(referenceImage),
+        filePath: null,
+      });
+      continue;
+    }
+
+    const buffer = referenceImage.buffer || null;
+    if (!buffer) {
+      continue;
+    }
+
+    normalized.push({
+      buffer,
+      mimeType: referenceImage.mimeType || detectMimeTypeFromBuffer(buffer),
+      filePath: referenceImage.filePath || null,
+    });
+  }
+
+  return normalized;
+}
+
+function extensionForMimeType(mimeType) {
+  if (mimeType === 'image/png') {
+    return 'png';
+  }
+  if (mimeType === 'image/webp') {
+    return 'webp';
+  }
+  return 'jpg';
+}
+
+function materializeReferenceImageFiles(referenceImages, outDir) {
+  return normalizeReferenceImages(referenceImages).map((referenceImage, index) => {
+    if (referenceImage.filePath && fs.existsSync(referenceImage.filePath)) {
+      return referenceImage.filePath;
+    }
+
+    const filePath = path.join(
+      outDir || DEFAULT_BROWSER_IMAGE_DOWNLOAD_DIR,
+      `reference-${Date.now()}-${index}.${extensionForMimeType(referenceImage.mimeType)}`
+    );
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, referenceImage.buffer);
+    return filePath;
+  });
+}
+
+async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 0) {
+  const { aspectRatio, resolution } = options;
+  const referenceImages = normalizeReferenceImages(options.referenceImages || options.referenceImage);
+  const hasReferenceImages = referenceImages.length > 0;
+  const model = 'grok-imagine-image';
+
+  if (hasReferenceImages) {
     console.log('Starting Grok IMAGE EDIT generation...');
   } else {
     console.log('Starting Grok text-to-image generation...');
@@ -42,24 +305,46 @@ async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 
     response_format: 'url'
   };
 
-  if (aspectRatio) {
+  if (aspectRatio && (referenceImages.length === 0 || referenceImages.length > 1)) {
     body.aspect_ratio = aspectRatio;
   }
 
-  if (resolution) {
-    body.resolution = resolution;
+  const imageResolution = normalizeImageResolution(resolution);
+  if (imageResolution) {
+    body.resolution = imageResolution;
   }
 
-  if (referenceImage) {
-    const base64 = referenceImage.toString('base64');
-    const mimeType = 'image/jpeg';
+  if (referenceImages.length === 1) {
+    const [referenceImage] = referenceImages;
+    const base64 = referenceImage.buffer.toString('base64');
     body.image = {
       type: 'image_url',
-      url: `data:${mimeType};base64,${base64}`
+      url: `data:${referenceImage.mimeType};base64,${base64}`
     };
+  } else if (referenceImages.length > 1) {
+    body.images = referenceImages.map((referenceImage) => ({
+      type: 'image_url',
+      url: `data:${referenceImage.mimeType};base64,${referenceImage.buffer.toString('base64')}`
+    }));
   }
 
-  const response = await fetch('https://api.x.ai/v1/images/generations', {
+  const endpoint = hasReferenceImages
+    ? 'https://api.x.ai/v1/images/edits'
+    : 'https://api.x.ai/v1/images/generations';
+  const estimatedCostUsd = estimateXaiImageCost({
+    model,
+    imageCount: 1,
+    inputImageCount: referenceImages.length,
+  });
+
+  assertSpendWithinLimit({
+    provider: 'xai',
+    operation: hasReferenceImages ? 'images.edit' : 'images.generate',
+    model,
+    projectedCostUsd: estimatedCostUsd || 0,
+  });
+
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -89,10 +374,30 @@ async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 
   }
 
   const data = await response.json();
+  const actualCostUsd = estimateXaiImageCost({
+    model,
+    imageCount: Number(data?.data?.length) || 1,
+    inputImageCount: referenceImages.length,
+  });
 
   if (!data.data || !data.data[0] || !data.data[0].url) {
     throw new Error(`Unexpected Grok response format: ${JSON.stringify(data)}`);
   }
+
+  recordApiSpend({
+    provider: 'xai',
+    operation: hasReferenceImages ? 'images.edit' : 'images.generate',
+    model,
+    costUsd: actualCostUsd || 0,
+    estimatedCostUsd,
+    metadata: {
+      aspect_ratio: aspectRatio || null,
+      resolution: resolution || null,
+      input_image_count: referenceImages.length,
+      output_image_count: Number(data?.data?.length) || 1,
+      endpoint,
+    },
+  });
 
   console.log('Grok image generation complete!');
   return data.data[0].url;
@@ -103,7 +408,8 @@ function resolveGrokWebSessionPath() {
     process.env.GROK_WEB_COOKIES_PATH,
     process.env.GROK_WEB_STATE_PATH,
     DEFAULT_GROK_STORAGE_PATH,
-    DEFAULT_GROK_COOKIES_PATH
+    DEFAULT_GROK_COOKIES_PATH,
+    DEFAULT_X_COOKIES_PATH
   ].filter(Boolean);
 
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
@@ -113,11 +419,14 @@ function buildGrokWebSessionArgs(sessionPath) {
   try {
     const raw = fs.readFileSync(sessionPath, 'utf8');
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) || Array.isArray(parsed?.cookies)) {
+    if (Array.isArray(parsed)) {
       return ['--cookies', sessionPath];
     }
     if (Array.isArray(parsed?.origins)) {
       return ['--state', sessionPath];
+    }
+    if (Array.isArray(parsed?.cookies)) {
+      return ['--cookies', sessionPath];
     }
   } catch {
     // Fall back to filename heuristics below.
@@ -146,13 +455,10 @@ function generateImageViaBrowser(prompt, options = {}) {
     );
   }
 
-  if (options.referenceImage) {
-    throw new Error('Browser image fallback does not support reference-image edits yet.');
-  }
-
   const outDir = options.outDir || process.env.GROK_IMAGE_OUT_DIR || DEFAULT_BROWSER_IMAGE_DOWNLOAD_DIR;
   fs.mkdirSync(outDir, { recursive: true });
   const beforeFiles = new Set(fs.readdirSync(outDir));
+  const referenceImagePaths = materializeReferenceImageFiles(options.referenceImages || options.referenceImage, outDir);
   const scriptPath = path.join(ROOT_DIR, 'code', 'image', 'grok-image-automation.js');
   const args = [
     scriptPath,
@@ -166,6 +472,10 @@ function generateImageViaBrowser(prompt, options = {}) {
     '--timeout-ms',
     process.env.GROK_WEB_TIMEOUT_MS || '240000'
   ];
+
+  for (const referenceImagePath of referenceImagePaths) {
+    args.push('--reference-image', referenceImagePath);
+  }
 
   if (process.env.GROK_WEB_HEADED === '1') {
     args.push('--headed');
@@ -215,12 +525,18 @@ export async function generateImage(tokens, prompt, options = {}) {
   }
 
   let cleanPrompt = prompt;
-  const noTextSuffix = ', absolutely no text, no writing, no letters, no words, no labels, no fine print on any surface';
-  if (!cleanPrompt.toLowerCase().includes('absolutely no text')) {
+  const noTextSuffix = shouldAllowLetterCharacters(prompt, options)
+    ? ', absolutely no written signage, no words, no labels, no captions, no fine print on any surface outside the character design'
+    : ', absolutely no text, no writing, no letters, no words, no labels, no fine print on any surface';
+  if (!cleanPrompt.toLowerCase().includes('absolutely no text') && !cleanPrompt.toLowerCase().includes('absolutely no written signage')) {
     cleanPrompt = cleanPrompt + noTextSuffix;
   }
 
-  if (!tokens.xaiApiKey) {
+  const forceBrowser = isBrowserOverrideEnabled();
+  if (!tokens.xaiApiKey || forceBrowser) {
+    if (forceBrowser) {
+      console.log('BROWSER_OVERRIDE=true detected, forcing Grok browser image generation...');
+    }
     return generateImageViaBrowser(cleanPrompt, options);
   }
 

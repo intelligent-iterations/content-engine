@@ -5,13 +5,61 @@ import axios from 'axios';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { AUTH_DIR, ROOT_DIR, isMainModule } from '../core/paths.js';
-import { generateImage as generateImageWithFallback, downloadImage, IMAGE_MODELS } from '../shared/generate-image.js';
+import {
+  buildVideoExecutionPlan,
+  loadVideoExecutionPlan,
+  saveVideoExecutionPlan,
+} from './execution-plan.js';
+import {
+  generateImage as generateImageWithFallback,
+  downloadImage,
+  IMAGE_MODELS,
+  detectMimeTypeFromBuffer,
+  isBrowserOverrideEnabled,
+  normalizeImageBufferForOutputPath,
+  padImageBufferToAspectRatio,
+} from '../shared/generate-image.js';
+import {
+  assertSpendWithinLimit,
+  estimateXaiImageCost,
+  estimateXaiVideoCost,
+  recordApiSpend,
+} from '../shared/api-spend-tracker.js';
 
 const XAI_API_KEY = process.env.XAI_API_KEY;
 const BASE_URL = 'https://api.x.ai/v1';
 const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
+const DEFAULT_X_COOKIES_PATH = path.join(ROOT_DIR, 'cookies', 'x_cookies.json');
+
+function effectiveXaiApiKey() {
+  return isBrowserOverrideEnabled() ? null : XAI_API_KEY;
+}
+
+function normalizeImageModel(value) {
+  const model = String(value || '').trim();
+  if (!model) {
+    return 'grok-imagine-image';
+  }
+
+  const legacyAliases = new Set([
+    'grok',
+    'grok-image',
+    'grok-2-image'
+  ]);
+
+  return legacyAliases.has(model) ? 'grok-imagine-image' : model;
+}
+
+function normalizeVideoModel(value) {
+  const model = String(value || '').trim();
+  if (!model) {
+    return 'grok-imagine-video';
+  }
+
+  return model;
+}
 
 export const api = axios.create({
   baseURL: BASE_URL,
@@ -61,7 +109,8 @@ function resolveGrokWebSessionPath() {
     process.env.GROK_WEB_COOKIES_PATH,
     process.env.GROK_WEB_STATE_PATH,
     DEFAULT_GROK_STORAGE_PATH,
-    DEFAULT_GROK_COOKIES_PATH
+    DEFAULT_GROK_COOKIES_PATH,
+    DEFAULT_X_COOKIES_PATH
   ].filter(Boolean);
 
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
@@ -71,11 +120,14 @@ function buildGrokWebSessionArgs(sessionPath) {
   try {
     const raw = fs.readFileSync(sessionPath, 'utf8');
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) || Array.isArray(parsed?.cookies)) {
+    if (Array.isArray(parsed)) {
       return ['--cookies', sessionPath];
     }
     if (Array.isArray(parsed?.origins)) {
       return ['--state', sessionPath];
+    }
+    if (Array.isArray(parsed?.cookies)) {
+      return ['--cookies', sessionPath];
     }
   } catch {
     // Fall back to filename heuristics below.
@@ -86,32 +138,6 @@ function buildGrokWebSessionArgs(sessionPath) {
   }
 
   return ['--cookies', sessionPath];
-}
-
-function buildBrowserClipPrompt(clip, clipDurationSeconds) {
-  return [
-    'Create a vertical 9:16 video clip.',
-    `Target duration: ${clipDurationSeconds} seconds.`,
-    'Treat the following image direction as the opening frame and visual identity to preserve.',
-    'Continuity is more important than novelty or extra detail.',
-    'If recurring characters are present, keep the exact same face/head design, silhouette, wardrobe logic, proportions, palette, environment, and cinematic style established by the image direction and continuity anchors.',
-    'Do not redesign characters into generic humans, new costumes, or a different art style.',
-    'If dialogue makes the acting feel weak, keep the acting simple and let the visual beat stay dominant.',
-    '',
-    'IMAGE DIRECTION:',
-    clip.imagePrompt,
-    '',
-    'CONTINUITY ANCHORS:',
-    clip.continuityAnchors || 'Preserve the same identity, wardrobe, set, and overall style established by the image prompt.',
-    '',
-    'Animate that exact scene using this motion and dialogue direction:',
-    '',
-    'VIDEO DIRECTION:',
-    clip.videoPrompt,
-    '',
-    'Keep the framing, character, body-part context, and action clear and legible.',
-    'Output a single finished video clip.'
-  ].join('\n');
 }
 
 function ensureDir(dirPath) {
@@ -131,22 +157,203 @@ function normalizeReferenceStrategy(value) {
   return strategy === 'shared_reference' ? 'shared_reference' : 'per_clip';
 }
 
+function parseCliArgs(argv = process.argv.slice(2)) {
+  const args = {
+    input: null,
+    md: null,
+    plan: null,
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--md' && argv[index + 1]) {
+      args.md = argv[index + 1];
+      index += 1;
+    } else if (arg === '--plan' && argv[index + 1]) {
+      args.plan = argv[index + 1];
+      index += 1;
+    } else if (!arg.startsWith('--') && !args.input) {
+      args.input = arg;
+    }
+  }
+
+  return args;
+}
+
+function mimeTypeForPath(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  return detectMimeTypeFromBuffer(buffer);
+}
+
+function localImagePathToDataUrl(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  const mimeType = detectMimeTypeFromBuffer(buffer);
+  return `data:${mimeType};base64,${buffer.toString('base64')}`;
+}
+
+function parseAspectRatio(aspectRatio = '9:16') {
+  const match = String(aspectRatio || '').trim().match(/^(\d+)\s*:\s*(\d+)$/);
+  if (!match) {
+    return { width: 9, height: 16 };
+  }
+  return {
+    width: Number(match[1]) || 9,
+    height: Number(match[2]) || 16,
+  };
+}
+
+function resolveTargetImageSize(aspectRatio = '9:16', resolution = '720p') {
+  const ratio = parseAspectRatio(aspectRatio);
+  const shortSide = String(resolution || '').includes('1080') ? 1080 : 720;
+
+  if (ratio.width <= ratio.height) {
+    return {
+      width: shortSide,
+      height: Math.round(shortSide * (ratio.height / ratio.width)),
+    };
+  }
+
+  return {
+    width: Math.round(shortSide * (ratio.width / ratio.height)),
+    height: shortSide,
+  };
+}
+
+function aspectDelta(width, height, targetWidth, targetHeight) {
+  const sourceRatio = width / height;
+  const targetRatio = targetWidth / targetHeight;
+  return Math.abs(sourceRatio - targetRatio);
+}
+
+async function prepareReferenceImageForVideo(referenceImagePath, options = {}) {
+  if (!referenceImagePath || !fs.existsSync(referenceImagePath)) {
+    return referenceImagePath;
+  }
+
+  const preparedDir = path.join(path.dirname(options.outputDir || path.dirname(referenceImagePath)), 'prepared-video-refs');
+  ensureDir(preparedDir);
+  const preparedPath = path.join(
+    preparedDir,
+    `clip${String(options.clipNum || 0).padStart(2, '0')}-${sanitizeFileName(options.clipName || path.basename(referenceImagePath, path.extname(referenceImagePath)))}.png`
+  );
+
+  const sourceBuffer = fs.readFileSync(referenceImagePath);
+  const paddedBuffer = await padImageBufferToAspectRatio(sourceBuffer, {
+    aspectRatio: options.aspectRatio,
+    resolution: options.resolution,
+    outputFormat: 'png',
+  });
+  const normalizedBuffer = await normalizeImageBufferForOutputPath(paddedBuffer, preparedPath);
+
+  // If the scene frame is already the right portrait asset, reuse it directly
+  // instead of creating a redundant copy in prepared-video-refs.
+  if (Buffer.compare(sourceBuffer, normalizedBuffer) === 0) {
+    return referenceImagePath;
+  }
+
+  fs.writeFileSync(preparedPath, normalizedBuffer);
+
+  return preparedPath;
+}
+
+export function loadSiblingAssetManifest(mdPath) {
+  const manifestPath = path.join(path.dirname(mdPath), 'asset-manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    console.warn(`Warning: failed to parse asset manifest at ${manifestPath}: ${error.message}`);
+    return null;
+  }
+}
+
+export function enrichClipsWithManifest(clips, assetManifest, mdPath) {
+  if (!assetManifest) {
+    return clips;
+  }
+
+  const baseDir = path.dirname(mdPath);
+  const sceneFrames = Array.isArray(assetManifest.scene_start_frames)
+    ? assetManifest.scene_start_frames
+    : [];
+
+  return clips.map((clip, index) => {
+    const frame = sceneFrames.find((entry) => {
+      if (entry.clip_index === index + 1) {
+        return true;
+      }
+
+      const clipName = String(clip.name || '').trim().toLowerCase();
+      const frameName = String(entry.clip_name || '').trim().toLowerCase();
+      return clipName && frameName && clipName === frameName;
+    });
+
+    if (!frame?.output_path) {
+      return clip;
+    }
+
+    const resolvedPath = path.resolve(baseDir, frame.output_path);
+    if (!fs.existsSync(resolvedPath)) {
+      return clip;
+    }
+
+    return {
+      ...clip,
+      sceneReferenceImagePath: resolvedPath,
+    };
+  });
+}
+
+export function createExecutionPlanFromMd(mdPath) {
+  const resolvedMdPath = path.resolve(mdPath);
+  const meta = parseCompilationMeta(resolvedMdPath);
+  const rawClips = parseCompilationMD(resolvedMdPath);
+  const assetManifest = loadSiblingAssetManifest(resolvedMdPath);
+  const clips = enrichClipsWithManifest(rawClips, assetManifest, resolvedMdPath);
+
+  return buildVideoExecutionPlan({
+    clips,
+    meta: {
+      ...meta,
+      compilation_md_path: resolvedMdPath,
+    },
+    assetManifest,
+  });
+}
+
+export function materializeExecutionPlanFromMd(mdPath, outputPath = null) {
+  const resolvedMdPath = path.resolve(mdPath);
+  const plan = createExecutionPlanFromMd(resolvedMdPath);
+  const planPath = saveVideoExecutionPlan(plan, resolvedMdPath, outputPath || undefined);
+  return {
+    plan: loadVideoExecutionPlan(planPath),
+    planPath,
+  };
+}
+
 async function persistReferenceImageAsset(imageResult, outputPath) {
   if (typeof imageResult === 'string' && !/^https?:\/\//i.test(imageResult)) {
     if (path.resolve(imageResult) !== path.resolve(outputPath)) {
-      fs.copyFileSync(imageResult, outputPath);
+      const buffer = fs.readFileSync(imageResult);
+      const normalizedBuffer = await normalizeImageBufferForOutputPath(buffer, outputPath);
+      fs.writeFileSync(outputPath, normalizedBuffer);
     }
     return outputPath;
   }
 
   const buffer = await downloadImage(imageResult);
-  fs.writeFileSync(outputPath, buffer);
+  const normalizedBuffer = await normalizeImageBufferForOutputPath(buffer, outputPath);
+  fs.writeFileSync(outputPath, normalizedBuffer);
   return outputPath;
 }
 
 async function generateReferenceAsset(prompt, outputPath, options = {}) {
+  const apiKey = effectiveXaiApiKey();
   const result = await generateImageWithFallback(
-    { xaiApiKey: XAI_API_KEY },
+    { xaiApiKey: apiKey },
     prompt,
     {
       model: IMAGE_MODELS.grok,
@@ -159,7 +366,7 @@ async function generateReferenceAsset(prompt, outputPath, options = {}) {
   const localPath = await persistReferenceImageAsset(result, outputPath);
   return {
     localPath,
-    imageUrl: XAI_API_KEY ? result : null,
+    imageUrl: apiKey ? result : null,
   };
 }
 
@@ -189,7 +396,7 @@ function generateClipViaBrowser(clip, videoPath, options = {}) {
 
   const requestedDurationSeconds = options.clipDurationSeconds || 6;
   const clipDurationSeconds = coerceBrowserClipDuration(requestedDurationSeconds);
-  const prompt = buildBrowserClipPrompt(clip, clipDurationSeconds);
+  const prompt = clip.primaryVideoPrompt;
   const scriptPath = path.join(ROOT_DIR, 'code', 'video', 'grok-video-automation.js');
   const outDir = path.dirname(videoPath);
   const beforeFiles = new Set(fs.readdirSync(outDir));
@@ -287,6 +494,23 @@ function shouldRetryWithFallback(error) {
   );
 }
 
+function parseClipHeader(firstLine) {
+  const header = String(firstLine || '').trim();
+  const match = header.match(/^(.*?)\s*--\s*(.+)$/);
+
+  if (!match) {
+    return {
+      name: header,
+      mood: null,
+    };
+  }
+
+  return {
+    name: match[1].trim(),
+    mood: match[2].trim(),
+  };
+}
+
 // Parse the compilation MD file into structured clips
 export function parseCompilationMD(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
@@ -300,8 +524,9 @@ export function parseCompilationMD(filePath) {
 
     // Get clip name from first line
     const firstLine = section.split('\n')[0].trim();
-    clip.name = firstLine.replace(/\s*--\s*(Wonder|Fear).*/, '').trim();
-    clip.mood = firstLine.includes('Fear') ? 'fear' : 'wonder';
+    const parsedHeader = parseClipHeader(firstLine);
+    clip.name = parsedHeader.name;
+    clip.mood = parsedHeader.mood ? parsedHeader.mood.toLowerCase() : null;
 
     // Extract image prompt
     const imageMatch = section.match(/### Image Prompt\s*```\s*([\s\S]*?)```/);
@@ -327,15 +552,29 @@ export function parseCompilationMD(filePath) {
 
 // Step 1: Generate image from prompt
 export async function generateImage(prompt, clipName, options = {}) {
-  if (!XAI_API_KEY) {
+  const apiKey = effectiveXaiApiKey();
+  if (!apiKey) {
     throw new Error('Missing XAI_API_KEY in .env');
   }
 
   console.log(`  [image] Generating image for ${clipName}...`);
+  const model = normalizeImageModel(options.imageModel);
+  const estimatedCostUsd = estimateXaiImageCost({
+    model,
+    imageCount: 1,
+    inputImageCount: 0,
+  });
+
+  assertSpendWithinLimit({
+    provider: 'xai',
+    operation: 'images.generate',
+    model,
+    projectedCostUsd: estimatedCostUsd || 0,
+  });
 
   const res = await withRetry(
     () => api.post('/images/generations', {
-      model: options.imageModel || 'grok-imagine-image',
+      model,
       prompt,
       n: 1,
       response_format: 'url',
@@ -345,19 +584,50 @@ export async function generateImage(prompt, clipName, options = {}) {
   );
 
   const imageUrl = res.data.data[0].url;
+  recordApiSpend({
+    provider: 'xai',
+    operation: 'images.generate',
+    model,
+    costUsd: estimateXaiImageCost({
+      model,
+      imageCount: Number(res.data?.data?.length) || 1,
+      inputImageCount: 0,
+    }) || 0,
+    estimatedCostUsd,
+    metadata: {
+      clip_name: clipName,
+      aspect_ratio: options.aspectRatio || '9:16',
+      output_image_count: Number(res.data?.data?.length) || 1,
+    },
+  });
   console.log(`  [image] Got image URL for ${clipName}`);
   return imageUrl;
 }
 
 // Step 2: Generate video from image + prompt
 export async function generateVideo(imageUrl, prompt, options = {}) {
-  if (!XAI_API_KEY) {
+  const apiKey = effectiveXaiApiKey();
+  if (!apiKey) {
     throw new Error('Missing XAI_API_KEY in .env');
   }
+  const model = normalizeVideoModel(options.videoModel);
+  const estimatedCostUsd = estimateXaiVideoCost({
+    model,
+    durationSeconds: options.clipDurationSeconds || 6,
+    resolution: options.resolution || '720p',
+    inputImageCount: imageUrl ? 1 : 0,
+  });
+
+  assertSpendWithinLimit({
+    provider: 'xai',
+    operation: 'videos.generate',
+    model,
+    projectedCostUsd: estimatedCostUsd || 0,
+  });
 
   const res = await withRetry(
     () => api.post('/videos/generations', {
-      model: options.videoModel || 'grok-imagine-video',
+      model,
       prompt,
       image: { url: imageUrl },
       duration: options.clipDurationSeconds || 6,
@@ -366,6 +636,26 @@ export async function generateVideo(imageUrl, prompt, options = {}) {
     }),
     { label: 'video:generate' }
   );
+
+  recordApiSpend({
+    provider: 'xai',
+    operation: 'videos.generate',
+    model,
+    costUsd: estimateXaiVideoCost({
+      model,
+      durationSeconds: options.clipDurationSeconds || 6,
+      resolution: options.resolution || '720p',
+      inputImageCount: imageUrl ? 1 : 0,
+    }) || 0,
+    estimatedCostUsd,
+    metadata: {
+      aspect_ratio: options.aspectRatio || '9:16',
+      duration_seconds: options.clipDurationSeconds || 6,
+      resolution: options.resolution || '720p',
+      request_id: res.data?.request_id || null,
+      used_input_image: Boolean(imageUrl),
+    },
+  });
 
   return res.data.request_id;
 }
@@ -423,9 +713,9 @@ export async function generateClip(clip, index, outputDir, options = {}) {
 
   console.log(`\n--- Clip ${clipNum}: ${clip.name} ---`);
 
-  if (!XAI_API_KEY) {
+  if (!effectiveXaiApiKey()) {
     const referenceStrategy = normalizeReferenceStrategy(options.referenceStrategy);
-    let referenceImagePath = options.sharedReferenceImagePath || null;
+    let referenceImagePath = clip.sceneReferenceImagePath || options.sharedReferenceImagePath || null;
 
     if (referenceStrategy === 'per_clip' || !referenceImagePath) {
       const referenceDir = path.join(path.dirname(outputDir), 'reference-images');
@@ -434,6 +724,14 @@ export async function generateClip(clip, index, outputDir, options = {}) {
       const generated = await generateReferenceAsset(clip.imagePrompt, targetPath, options);
       referenceImagePath = generated.localPath;
     }
+
+    referenceImagePath = await prepareReferenceImageForVideo(referenceImagePath, {
+      aspectRatio: options.aspectRatio,
+      resolution: options.resolution,
+      outputDir,
+      clipNum,
+      clipName: clip.name,
+    });
 
     try {
       return generateClipViaBrowser(clip, videoPath, {
@@ -448,7 +746,7 @@ export async function generateClip(clip, index, outputDir, options = {}) {
       console.log(`  [browser] Primary prompt failed for ${clip.name}, retrying with fallback prompt...`);
       return generateClipViaBrowser({
         ...clip,
-        videoPrompt: clip.fallbackVideoPrompt,
+        primaryVideoPrompt: clip.fallbackVideoPrompt,
       }, videoPath, {
         ...options,
         referenceImagePath,
@@ -457,9 +755,20 @@ export async function generateClip(clip, index, outputDir, options = {}) {
   }
 
   const referenceStrategy = normalizeReferenceStrategy(options.referenceStrategy);
-  let imageUrl = options.sharedReferenceImageUrl || null;
+  const sceneReferenceImagePath = clip.sceneReferenceImagePath
+    ? await prepareReferenceImageForVideo(clip.sceneReferenceImagePath, {
+      aspectRatio: options.aspectRatio,
+      resolution: options.resolution,
+      outputDir,
+      clipNum,
+      clipName: clip.name,
+    })
+    : null;
+  let imageUrl = clip.sceneReferenceImagePath
+    ? localImagePathToDataUrl(sceneReferenceImagePath)
+    : (options.sharedReferenceImageUrl || null);
 
-  if (referenceStrategy === 'per_clip' || !imageUrl) {
+  if ((referenceStrategy === 'per_clip' || !imageUrl) && !clip.sceneReferenceImagePath) {
     imageUrl = await generateImage(clip.imagePrompt, clip.name, options);
   }
 
@@ -467,14 +776,22 @@ export async function generateClip(clip, index, outputDir, options = {}) {
   console.log(`  [video] Starting video generation for ${clip.name}...`);
   let requestId;
   try {
-    requestId = await generateVideo(imageUrl, clip.videoPrompt, options);
+    requestId = await generateVideo(
+      imageUrl,
+      clip.primaryVideoPrompt,
+      options
+    );
   } catch (error) {
     if (!clip.fallbackVideoPrompt || !shouldRetryWithFallback(error)) {
       throw error;
     }
 
     console.log(`  [video] Primary prompt rejected for ${clip.name}, retrying with fallback prompt...`);
-    requestId = await generateVideo(imageUrl, clip.fallbackVideoPrompt, options);
+    requestId = await generateVideo(
+      imageUrl,
+      clip.fallbackVideoPrompt,
+      options
+    );
   }
   console.log(`  [video] Request ID: ${requestId}`);
 
@@ -488,7 +805,11 @@ export async function generateClip(clip, index, outputDir, options = {}) {
     }
 
     console.log(`  [video] Generated video failed moderation for ${clip.name}, retrying with fallback prompt...`);
-    const fallbackRequestId = await generateVideo(imageUrl, clip.fallbackVideoPrompt, options);
+    const fallbackRequestId = await generateVideo(
+      imageUrl,
+      clip.fallbackVideoPrompt,
+      options
+    );
     console.log(`  [video] Fallback request ID: ${fallbackRequestId}`);
     videoUrl = await pollForVideo(fallbackRequestId, clip.name);
   }
@@ -536,70 +857,55 @@ export function stitchClips(clipPaths, outputPath) {
   console.log(`\nFinal video: ${outputPath}`);
 }
 
-// Main
-export async function main() {
-  const mdFile = process.argv[2];
+export async function executeExecutionPlan(executionPlan) {
+  const referenceStrategy = normalizeReferenceStrategy(executionPlan.referenceStrategy);
+  const runDir = executionPlan.runDir || (executionPlan.compilationMdPath ? path.dirname(executionPlan.compilationMdPath) : process.cwd());
+  const baseName = executionPlan.baseName || (executionPlan.compilationMdPath ? path.basename(executionPlan.compilationMdPath, '.md') : 'video');
+  console.log(`Parsed ${executionPlan.jobs.length} clips from ${executionPlan.compilationMdPath ? path.basename(executionPlan.compilationMdPath) : baseName}\n`);
 
-  if (!mdFile) {
-    console.error('Usage: node code/cli/video-compilation.js <path-to-compilation.md>');
-    console.error('Example: node code/cli/video-compilation.js output/videos/skincare-benefits-hero-compilation.md');
-    process.exit(1);
-  }
-
-  const mdPath = path.resolve(mdFile);
-  if (!fs.existsSync(mdPath)) {
-    console.error(`File not found: ${mdPath}`);
-    process.exit(1);
-  }
-
-  // Parse the MD
-  const meta = parseCompilationMeta(mdPath);
-  const clips = parseCompilationMD(mdPath);
-  const referenceStrategy = normalizeReferenceStrategy(meta.reference_strategy);
-  console.log(`Parsed ${clips.length} clips from ${path.basename(mdPath)}\n`);
-
-  for (const clip of clips) {
+  for (const clip of executionPlan.jobs) {
     console.log(`  - ${clip.name} (${clip.mood})`);
   }
 
-  // Create output directory
-  const baseName = path.basename(mdPath, '.md');
-  const outputDir = path.join(path.dirname(mdPath), 'clips');
+  const outputDir = executionPlan.clipsOutputDir || path.join(runDir, 'clips');
   fs.mkdirSync(outputDir, { recursive: true });
 
   let sharedReferenceImagePath = null;
   let sharedReferenceImageUrl = null;
-  if (referenceStrategy === 'shared_reference' && clips[0]?.imagePrompt) {
-    const referenceDir = path.join(path.dirname(mdPath), 'reference');
+  const everyClipHasSceneFrame = executionPlan.jobs.length > 0 && executionPlan.jobs.every((clip) => clip.sceneReferenceImagePath);
+  if (referenceStrategy === 'shared_reference' && executionPlan.jobs[0]?.imagePrompt && !everyClipHasSceneFrame) {
+    const referenceDir = path.join(runDir, 'reference');
     ensureDir(referenceDir);
     const sharedReferencePath = path.join(referenceDir, 'shared-reference.png');
     console.log(`\n--- Generating shared reference image (${referenceStrategy}) ---`);
-    const sharedReference = await generateReferenceAsset(clips[0].imagePrompt, sharedReferencePath, {
-      aspectRatio: meta.aspect_ratio,
-      resolution: meta.resolution,
+    const sharedReference = await generateReferenceAsset(executionPlan.jobs[0].imagePrompt, sharedReferencePath, {
+      aspectRatio: executionPlan.aspectRatio,
+      resolution: executionPlan.resolution,
     });
     sharedReferenceImagePath = sharedReference.localPath;
     sharedReferenceImageUrl = sharedReference.imageUrl;
     console.log(`Shared reference image: ${sharedReferenceImagePath}`);
+  } else if (everyClipHasSceneFrame) {
+    console.log('\n--- Using saved scene start frames from asset-manifest.json for per-clip continuity ---');
   }
 
   // Generate each clip
   const clipPaths = [];
-  for (let i = 0; i < clips.length; i++) {
+  for (let i = 0; i < executionPlan.jobs.length; i++) {
     try {
-      const clipPath = await generateClip(clips[i], i, outputDir, {
+      const clipPath = await generateClip(executionPlan.jobs[i], i, outputDir, {
         referenceStrategy,
         sharedReferenceImagePath,
         sharedReferenceImageUrl,
-        clipDurationSeconds: meta.clip_duration_seconds,
-        aspectRatio: meta.aspect_ratio,
-        resolution: meta.resolution,
-        imageModel: meta.image_model,
-        videoModel: meta.video_model,
+        clipDurationSeconds: executionPlan.clipDurationSeconds,
+        aspectRatio: executionPlan.aspectRatio,
+        resolution: executionPlan.resolution,
+        imageModel: executionPlan.imageModel,
+        videoModel: executionPlan.videoModel,
       });
       clipPaths.push(clipPath);
     } catch (err) {
-      console.error(`\nFailed on clip ${i + 1} (${clips[i].name}): ${err.message}`);
+      console.error(`\nFailed on clip ${i + 1} (${executionPlan.jobs[i].name}): ${err.message}`);
       console.error('Continuing with remaining clips...\n');
     }
   }
@@ -609,12 +915,50 @@ export async function main() {
     process.exit(1);
   }
 
-  // Stitch together
-  const finalPath = path.join(path.dirname(mdPath), `${baseName}.mp4`);
-  stitchClips(clipPaths, finalPath);
+  const finalPath = executionPlan.finalVideoPath || path.join(runDir, `${baseName}.mp4`);
+  const stitchedPath = executionPlan.stitchedVideoPath || finalPath;
+  stitchClips(clipPaths, stitchedPath);
 
-  console.log(`\nDone! ${clipPaths.length}/${clips.length} clips generated and stitched.`);
-  console.log(`Output: ${finalPath}`);
+  console.log(`\nDone! ${clipPaths.length}/${executionPlan.jobs.length} clips generated and stitched.`);
+  console.log(`Output: ${stitchedPath}`);
+  return {
+    clipPaths,
+    stitchedPath,
+    finalPath,
+  };
+}
+
+// Main
+export async function main(argv = process.argv.slice(2)) {
+  const args = parseCliArgs(argv);
+  const input = args.plan || args.md || args.input;
+
+  if (!input) {
+    console.error('Usage: node code/cli/video-compilation.js <path-to-compilation.md | path-to-execution-plan.json>');
+    console.error('Example: node code/cli/video-compilation.js output/videos/story/story.md');
+    process.exit(1);
+  }
+
+  const resolvedInput = path.resolve(input);
+  if (!fs.existsSync(resolvedInput)) {
+    console.error(`File not found: ${resolvedInput}`);
+    process.exit(1);
+  }
+
+  let executionPlan;
+  if (args.plan || path.extname(resolvedInput).toLowerCase() === '.json') {
+    executionPlan = loadVideoExecutionPlan(resolvedInput);
+  } else {
+    const materialized = materializeExecutionPlanFromMd(resolvedInput);
+    executionPlan = materialized.plan;
+    console.log(`Saved execution plan: ${materialized.planPath}\n`);
+  }
+
+  const result = await executeExecutionPlan(executionPlan);
+  if (result.stitchedPath !== result.finalPath) {
+    fs.renameSync(result.stitchedPath, result.finalPath);
+    console.log(`Final video: ${result.finalPath}`);
+  }
 }
 
 if (isMainModule(import.meta.url)) {
