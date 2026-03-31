@@ -26,7 +26,9 @@ Everything is **template-first** — your ideas become reusable formats, not thr
 
 Example output:
 
-<video src="example/fruit-revenge-arc-api-portrait/fruit-revenge-arc-api-portrait.mp4" poster="example/fruit-revenge-arc-api-portrait/example-frame.jpg" controls muted playsinline width="360"></video>
+<a href="example/fruit-revenge-arc-api-portrait/fruit-revenge-arc-api-portrait.mp4">
+  <img src="example/fruit-revenge-arc-api-portrait/preview.gif" width="360" alt="Fruit revenge arc example video preview" />
+</a>
 
 [`example/fruit-revenge-arc-api-portrait/fruit-revenge-arc-api-portrait.mp4`](example/fruit-revenge-arc-api-portrait/fruit-revenge-arc-api-portrait.mp4)
 
