@@ -2,7 +2,7 @@
   <img src="assets/logo-goo.png" width="280" alt="Content Engine logo" />
 </p>
 
-<h1 align="center">Content Engine</h1>
+<h1 align="center">II Content Engine</h1>
 
 <p align="center">
   AI-powered content engine for videos and carousels.<br/>
@@ -18,7 +18,7 @@
 
 ---
 
-Content Engine turns plain-English prompts into publish-ready videos and carousels for TikTok, Instagram, and X. Open the repo in [Claude Code](https://claude.ai) or [Codex](https://openai.com/codex), describe what you want, and the agent handles research, template selection, asset generation, captioning, and scheduled posting.
+II Content Engine turns plain-English prompts into publish-ready videos and carousels for TikTok, Instagram, and X. Open the repo in [Claude Code](https://claude.ai) or [Codex](https://openai.com/codex), describe what you want, and the agent handles research, template selection, asset generation, captioning, and scheduled posting.
 
 Everything is **template-first** — your ideas become reusable formats, not throwaway prompts. Generation is powered by **Grok** (API key or browser session), so you can produce content with or without an xAI API key. Approved assets flow into a scheduling queue that posts on your behalf.
 
