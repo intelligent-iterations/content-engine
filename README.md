@@ -11,7 +11,6 @@
 
 <p align="center">
   <a href="https://github.com/intelligent-iterations/content-engine/actions/workflows/ci.yml"><img src="https://github.com/intelligent-iterations/content-engine/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/intelligent-iterations/content-engine/releases"><img src="https://img.shields.io/github/v/release/intelligent-iterations/content-engine?label=version" alt="Version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg" alt="Node.js >= 18" />
   <a href="https://discord.gg/DEGQX9RVNn"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
