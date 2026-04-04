@@ -17,10 +17,13 @@ function resolveIIRoot() {
 
 export const ROOT_DIR = path.join(__dirname, '..', '..');
 export const DOCS_DIR = path.join(ROOT_DIR, 'docs');
-export const PROMPTS_DIR = path.join(ROOT_DIR, 'prompts');
-export const AUTH_DIR = path.join(ROOT_DIR, 'auth');
 export const II_ROOT = resolveIIRoot();
 export const OUTPUT_DIR = II_ROOT;
+export const AUTH_DIR = path.join(II_ROOT, 'auth');
+export const COOKIES_DIR = path.join(II_ROOT, 'cookies');
+export const PROMPTS_DIR = path.join(II_ROOT, 'prompts');
+export const RESEARCH_DIR = path.join(II_ROOT, 'research');
+export const DOWNLOADS_DIR = path.join(II_ROOT, 'downloads');
 export const VIDEOS_DIR = path.join(OUTPUT_DIR, 'videos');
 export const CAROUSELS_DIR = path.join(OUTPUT_DIR, 'carousels');
 export const SCHEDULED_VIDEOS_DIR = path.join(OUTPUT_DIR, 'scheduled_videos');

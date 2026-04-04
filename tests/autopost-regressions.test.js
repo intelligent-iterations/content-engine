@@ -6,7 +6,7 @@ import path from 'path';
 import sharp from 'sharp';
 
 import { processSlideshow } from '../code/crop-for-instagram.js';
-import { ROOT_DIR, SCHEDULED_CAROUSELS_DIR } from '../code/core/paths.js';
+import { II_ROOT, SCHEDULED_CAROUSELS_DIR } from '../code/core/paths.js';
 import { postToX, selectImages } from '../code/posting/post-to-x.js';
 import { findPostedStatusUrl, hasTransientComposerError } from '../code/posting/x-browser-post.js';
 import { listScheduledItems, resolvePostOutroPath } from '../code/shared/scheduled-queue.js';
@@ -121,14 +121,14 @@ test('listScheduledItems skips malformed schedule manifests instead of aborting 
   }
 });
 
-test('resolvePostOutroPath keeps relative overrides rooted inside the repo', () => {
+test('resolvePostOutroPath keeps relative overrides rooted inside II_ROOT', () => {
   const resolved = resolvePostOutroPath({
     post_defaults: {
-      outro_path: 'assets/post/plug.mov',
+      outro_path: 'assets/plug.mov',
     },
   });
 
-  assert.equal(resolved, path.join(ROOT_DIR, 'assets/post/plug.mov'));
+  assert.equal(resolved, path.join(II_ROOT, 'assets/plug.mov'));
 });
 
 test('hasTransientComposerError detects the X composer retry banner', () => {

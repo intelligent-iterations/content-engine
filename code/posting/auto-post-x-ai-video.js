@@ -33,8 +33,7 @@ import {
 import { II_ROOT, ROOT_DIR } from '../core/paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.join(__dirname, '..', '..');
-dotenv.config({ path: path.join(REPO_ROOT, '.env') });
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 const PLATFORM = 'x';
 const CHAT_MODEL = 'grok-4-1-fast-non-reasoning';
 

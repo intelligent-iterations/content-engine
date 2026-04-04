@@ -5,11 +5,12 @@ import path from 'path';
 import { chromium } from 'playwright';
 import { applyCookiesFileToContext, applyStorageStateToContext } from '../shared/grok-browser-session.js';
 import { ensureAuthenticatedGrokSession } from '../shared/grok-web-auth.js';
+import { AUTH_DIR, COOKIES_DIR, TEMP_DIR } from '../core/paths.js';
 
-const OUTPUT_DIR = path.resolve('output/tmp/browser-submit-probe');
-const STATE_PATH = path.resolve('auth/grok-storage-state.json');
-const COOKIES_PATH = path.resolve('cookies/x_cookies.json');
-const USER_DATA_DIR = path.resolve('auth/grok-chrome-profile-web-fallback');
+const OUTPUT_DIR = path.join(TEMP_DIR, 'browser-submit-probe');
+const STATE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
+const COOKIES_PATH = path.join(COOKIES_DIR, 'x_cookies.json');
+const USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
 
 function parseArgs(argv) {
   const args = {

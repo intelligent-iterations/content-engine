@@ -7,7 +7,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import sharp from 'sharp';
-import { AUTH_DIR, ROOT_DIR, TEMP_DIR } from '../core/paths.js';
+import { AUTH_DIR, COOKIES_DIR, TEMP_DIR } from '../core/paths.js';
 import {
   assertSpendWithinLimit,
   estimateXaiImageCost,
@@ -22,7 +22,7 @@ const RATE_LIMIT_WAIT = 5000; // 5 seconds between requests
 const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
-const DEFAULT_X_COOKIES_PATH = path.join(ROOT_DIR, 'cookies', 'x_cookies.json');
+const DEFAULT_X_COOKIES_PATH = path.join(COOKIES_DIR, 'x_cookies.json');
 const DEFAULT_BROWSER_IMAGE_DOWNLOAD_DIR = path.join(TEMP_DIR, 'grok-images');
 
 export const IMAGE_MODELS = {

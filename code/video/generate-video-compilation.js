@@ -4,7 +4,7 @@ import path from 'path';
 import axios from 'axios';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { AUTH_DIR, ROOT_DIR, isMainModule } from '../core/paths.js';
+import { AUTH_DIR, COOKIES_DIR, ROOT_DIR, isMainModule } from '../core/paths.js';
 import {
   buildVideoExecutionPlan,
   loadVideoExecutionPlan,
@@ -31,7 +31,7 @@ const BASE_URL = 'https://api.x.ai/v1';
 const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
-const DEFAULT_X_COOKIES_PATH = path.join(ROOT_DIR, 'cookies', 'x_cookies.json');
+const DEFAULT_X_COOKIES_PATH = path.join(COOKIES_DIR, 'x_cookies.json');
 
 function effectiveXaiApiKey() {
   return isBrowserOverrideEnabled() ? null : XAI_API_KEY;

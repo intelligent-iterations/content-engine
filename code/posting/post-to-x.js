@@ -12,7 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { postToXViaBrowser } from './x-browser-post.js';
-import { II_ROOT, SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
+import { II_ROOT, ROOT_DIR, SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
 import { resolveScheduledItem, updateScheduledPlatformPost } from '../shared/scheduled-queue.js';
 import {
   assertSpendWithinLimit,
@@ -23,8 +23,7 @@ import {
 } from '../shared/api-spend-tracker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.join(__dirname, '..', '..');
-dotenv.config({ path: path.join(REPO_ROOT, '.env') });
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 // --- HASHTAG POOLS (rotate to avoid repetition penalty) ---
 const BROAD_HASHTAGS = ['#creators', '#marketing', '#content', '#video', '#automation', '#socialmedia', '#creative'];

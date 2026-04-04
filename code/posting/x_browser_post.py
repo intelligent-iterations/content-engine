@@ -26,9 +26,8 @@ import zendriver as zd
 from zendriver.core.config import Config as ZDConfig
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-COOKIE_FILE = REPO_ROOT / "cookies" / "x_cookies.json"
 II_ROOT = Path(os.environ.get("II_ROOT", str(Path.home() / "ii" / "content-engine")))
+COOKIE_FILE = II_ROOT / "cookies" / "x_cookies.json"
 CHROME_PATH_MACOS = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CHROMIUM_PATH_LINUX = "/usr/bin/chromium"
 

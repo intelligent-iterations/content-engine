@@ -9,14 +9,13 @@ import {
   ensureInstagramLoggedIn,
   saveCookies,
 } from './instagram-auth.js';
-import { II_ROOT } from '../core/paths.js';
+import { COOKIES_DIR, II_ROOT, ROOT_DIR } from '../core/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const REPO_ROOT = path.join(__dirname, '..', '..');
-const COOKIE_FILE = path.join(REPO_ROOT, 'cookies', 'instagram_cookies.json');
+const COOKIE_FILE = path.join(COOKIES_DIR, 'instagram_cookies.json');
 
-dotenv.config({ path: path.join(REPO_ROOT, '.env') });
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 function chromiumLaunchOptions(headless) {
   const executablePath = fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined;

@@ -18,11 +18,6 @@ services:
       - .env
     volumes:
       - ${II_ROOT:-~/ii/content-engine}:/app/output
-      - ./downloads:/app/downloads
-      - ./cookies:/app/cookies
-      - ./auth:/app/auth
-      - ./research:/app/research
-      - ${CONTENT_ENGINE_POST_OUTRO_PATH:-/Users/admin/Documents/plug.mov}:${CONTENT_ENGINE_POST_OUTRO_PATH:-/Users/admin/Documents/plug.mov}:ro
       - ./.env:/app/.env:ro
 
   generate:
@@ -44,8 +39,4 @@ services:
       - .env
     volumes:
       - ${II_ROOT:-~/ii/content-engine}:/app/output
-      - ./downloads:/app/downloads
-      - ./cookies:/app/cookies
-      - ./auth:/app/auth
-      - ./research:/app/research
       - ./.env:/app/.env:ro

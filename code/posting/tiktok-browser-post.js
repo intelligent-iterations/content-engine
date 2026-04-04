@@ -21,14 +21,13 @@ import path from 'path';
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { II_ROOT } from '../core/paths.js';
+import { COOKIES_DIR, II_ROOT, ROOT_DIR } from '../core/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const REPO_ROOT = path.join(__dirname, '..', '..');
-const COOKIE_FILE = path.join(REPO_ROOT, 'cookies', 'tiktok_cookies.json');
+const COOKIE_FILE = path.join(COOKIES_DIR, 'tiktok_cookies.json');
 
-dotenv.config({ path: path.join(REPO_ROOT, '.env') });
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 let resolvedUsername = (process.env.TIKTOK_ACCOUNT_NAME || '').replace(/^@/, '');
 const CREATOR_UPLOAD_URL = 'https://www.tiktok.com/creator#/upload?scene=creator_center';

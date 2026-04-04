@@ -16,7 +16,7 @@ import {
 } from './post-promo.js';
 
 const SCHEDULE_FILE = 'schedule.json';
-const DEFAULT_POST_OUTRO_PATH = process.env.CONTENT_ENGINE_POST_OUTRO_PATH || '/Users/admin/Documents/plug.mov';
+const DEFAULT_POST_OUTRO_PATH = process.env.CONTENT_ENGINE_POST_OUTRO_PATH || 'assets/plug.mov';
 const DEFAULT_RETRY_DELAY_MS = 15 * 60 * 1000;
 const MAX_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
 const LOCK_DIR_SUFFIX = '.lock';
@@ -360,7 +360,7 @@ export function resolvePostOutroPath(manifest = {}) {
 
   return path.isAbsolute(configured)
     ? configured
-    : path.join(ROOT_DIR, configured);
+    : path.join(II_ROOT, configured);
 }
 
 export function updateScheduledPlatformPost(type, itemDir, platform, details) {

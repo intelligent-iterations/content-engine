@@ -21,13 +21,12 @@ import {
   updateScheduledPlatformPost,
 } from '../shared/scheduled-queue.js';
 import { normalizeCaptionForPosting } from '../shared/post-promo.js';
-import { II_ROOT } from '../core/paths.js';
+import { II_ROOT, ROOT_DIR } from '../core/paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.join(__dirname, '..', '..');
 const PLATFORM = 'tiktok';
 
-dotenv.config({ path: path.join(REPO_ROOT, '.env') });
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 const POSTS_PER_RUN = 1;
 
