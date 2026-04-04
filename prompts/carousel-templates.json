@@ -1,3 +1,25 @@
 {
-  "templates": []
+  "templates": [
+    {
+      "id": "seasonal-sweets-how-to",
+      "label": "Seasonal Sweets How-To",
+      "description": "Step-by-step dessert carousel for a cozy seasonal treat with one clear action per slide, realistic food visuals, and a save-forward ending.",
+      "content_angle": "Promise-first recipe explainer with ingredients, one action per card, a strong final result image, and a CTA that encourages saves before a holiday baking session.",
+      "hook_examples": [
+        "How to make peanut butter Easter eggs",
+        "Save this Easter candy tutorial",
+        "A cozy homemade Easter treat"
+      ],
+      "slide_examples": [
+        "How to make peanut butter Easter eggs",
+        "Mix the creamy peanut butter filling",
+        "Shape, chill, dip, and save"
+      ],
+      "caption_examples": [
+        "This carousel breaks the recipe into clean, save-worthy steps.",
+        "Use one action per card so the viewer never has to guess what happens next.",
+        "Keep the wording literal and searchable so the post performs as both a tutorial and a reference."
+      ]
+    }
+  ]
 }

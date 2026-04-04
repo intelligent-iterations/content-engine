@@ -32,6 +32,8 @@ Example output:
 
 [`example/fruit-revenge-arc-api-portrait/fruit-revenge-arc-api-portrait.mp4`](example/fruit-revenge-arc-api-portrait/fruit-revenge-arc-api-portrait.mp4)
 
+Click the preview to open the full MP4.
+
 This is the current reference example for the video pipeline. It was generated from saved repo state, not a one-off prompt, and it follows the intended chain:
 
 `hero portrait -> reference sheet -> portrait scene-start frame -> clip -> stitched final`

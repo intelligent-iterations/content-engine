@@ -49,6 +49,30 @@ function isValidFolder(folderName) {
   return hasSlides;
 }
 
+function hasCompleteInstagramRender(folderPath) {
+  const instagramFolder = path.join(folderPath, 'instagram');
+  if (!fs.existsSync(instagramFolder)) {
+    return false;
+  }
+
+  const metadataPath = path.join(folderPath, 'metadata.json');
+  if (!fs.existsSync(metadataPath)) {
+    return false;
+  }
+
+  const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+  const expectedSlides = Array.isArray(metadata.slides) ? metadata.slides.length : 0;
+  if (expectedSlides === 0) {
+    return false;
+  }
+
+  const renderedSlides = fs.readdirSync(instagramFolder)
+    .filter(file => /^slide_\d+\.(jpg|png)$/i.test(file))
+    .length;
+
+  return renderedSlides >= expectedSlides;
+}
+
 /**
  * Main auto-post function
  */
@@ -97,9 +121,7 @@ async function autoPostToInstagram() {
 
   const folderPath = selectedFolder.dir;
 
-  // Check if already cropped for Instagram
-  const instagramFolder = path.join(folderPath, 'instagram');
-  if (!fs.existsSync(instagramFolder)) {
+  if (!hasCompleteInstagramRender(folderPath)) {
     console.log('Cropping for Instagram...');
     await processSlideshow(folderPath);
     console.log();

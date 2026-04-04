@@ -41,7 +41,8 @@
     "docker:x:midday": "docker compose run --rm --no-deps autopost node code/posting/run-x-slot.js midday",
     "docker:x:evening": "docker compose run --rm --no-deps autopost node code/posting/run-x-slot.js evening",
     "docker:tiktok:morning": "docker compose run --rm --no-deps autopost node code/posting/run-tiktok-slot.js morning",
-    "docker:tiktok:evening": "docker compose run --rm --no-deps autopost node code/posting/run-tiktok-slot.js evening"
+    "docker:tiktok:evening": "docker compose run --rm --no-deps autopost node code/posting/run-tiktok-slot.js evening",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "axios": "^1.13.4",

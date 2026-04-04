@@ -11,13 +11,12 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
+import { II_ROOT, ROOT_DIR, SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
 import { resolveScheduledItem, updateScheduledPlatformPost } from '../shared/scheduled-queue.js';
 import { postToInstagramViaBrowser } from './instagram-browser-post.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.join(__dirname, '..', '..');
-dotenv.config({ path: path.join(REPO_ROOT, '.env') });
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 function resolveFolderPath(folderPath) {
   if (path.isAbsolute(folderPath)) return folderPath;
@@ -118,7 +117,7 @@ async function postToInstagram(folderPath) {
   updateScheduledPlatformPost('carousel', resolvedFolder, 'instagram', {
     post_id: result.postId,
     permalink: result.postUrl,
-    source_file: path.relative(REPO_ROOT, resolvedFolder),
+    source_file: path.relative(II_ROOT, resolvedFolder),
   });
 
   return result;

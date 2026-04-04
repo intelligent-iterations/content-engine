@@ -12,7 +12,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { postToXViaBrowser } from './x-browser-post.js';
-import { SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
+import { II_ROOT, ROOT_DIR, SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
 import { resolveScheduledItem, updateScheduledPlatformPost } from '../shared/scheduled-queue.js';
 import {
   assertSpendWithinLimit,
@@ -23,8 +23,7 @@ import {
 } from '../shared/api-spend-tracker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.join(__dirname, '..', '..');
-dotenv.config({ path: path.join(REPO_ROOT, '.env') });
+dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
 // --- HASHTAG POOLS (rotate to avoid repetition penalty) ---
 const BROAD_HASHTAGS = ['#creators', '#marketing', '#content', '#video', '#automation', '#socialmedia', '#creative'];
@@ -155,9 +154,14 @@ Return ONLY the tweet text with line breaks. Nothing else.`;
  * 3. Skip low-value CTA slides when possible
  * Prefer instagram/ cropped (4:5) when available, fall back to original 9:16
  */
+function folderHasSlideImages(folderPath) {
+  return fs.existsSync(folderPath)
+    && fs.readdirSync(folderPath).some(f => /^slide_\d+\.(jpg|png)$/i.test(f));
+}
+
 function selectImages(folderPath) {
   const instagramFolder = path.join(folderPath, 'instagram');
-  const useInstagram = fs.existsSync(instagramFolder);
+  const useInstagram = folderHasSlideImages(instagramFolder);
   const imageFolder = useInstagram ? instagramFolder : folderPath;
 
   // Load metadata for slide info
@@ -285,7 +289,7 @@ async function postToX(folderPath) {
   updateScheduledPlatformPost('carousel', folderPath, 'x', {
     post_id: tweetId,
     permalink: tweetUrl,
-    source_file: path.relative(REPO_ROOT, folderPath),
+    source_file: path.relative(II_ROOT, folderPath),
   });
 
   return { tweetId, tweetUrl };
@@ -328,3 +332,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 }
 
 export { postToX };
+export { selectImages };
