@@ -21,6 +21,7 @@ import path from 'path';
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { II_ROOT } from '../core/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -100,11 +101,11 @@ async function saveCookies(context) {
 
 async function saveDebugScreenshot(page, label) {
   try {
-    const debugDir = path.join(REPO_ROOT, 'output', 'debug');
+    const debugDir = path.join(II_ROOT, 'debug');
     fs.mkdirSync(debugDir, { recursive: true });
     const filename = `tiktok-${label}-${Date.now()}.png`;
     await page.screenshot({ path: path.join(debugDir, filename), fullPage: false });
-    console.log(`  [debug] Screenshot saved: output/debug/${filename}`);
+    console.log(`  [debug] Screenshot saved: ${path.join(debugDir, filename)}`);
     return filename;
   } catch {
     return null;

@@ -13,14 +13,16 @@ services:
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       CONTENT_GEN_PYTHON: /usr/bin/python3
       CONTENT_GEN_DISABLE_BROWSER_SANDBOX: "1"
+      II_ROOT: /app/output
     env_file:
       - .env
     volumes:
-      - ./output:/app/output
+      - ${II_ROOT:-~/ii/content-engine}:/app/output
       - ./downloads:/app/downloads
       - ./cookies:/app/cookies
       - ./auth:/app/auth
       - ./research:/app/research
+      - ${CONTENT_ENGINE_POST_OUTRO_PATH:-/Users/admin/Documents/plug.mov}:${CONTENT_ENGINE_POST_OUTRO_PATH:-/Users/admin/Documents/plug.mov}:ro
       - ./.env:/app/.env:ro
 
   generate:
@@ -37,10 +39,11 @@ services:
       PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
       CONTENT_GEN_PYTHON: /usr/bin/python3
       CONTENT_GEN_DISABLE_BROWSER_SANDBOX: "1"
+      II_ROOT: /app/output
     env_file:
       - .env
     volumes:
-      - ./output:/app/output
+      - ${II_ROOT:-~/ii/content-engine}:/app/output
       - ./downloads:/app/downloads
       - ./cookies:/app/cookies
       - ./auth:/app/auth

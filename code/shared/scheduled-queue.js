@@ -3,6 +3,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import {
   CAROUSELS_DIR,
+  II_ROOT,
   POSTED_VIDEOS_DIR,
   ROOT_DIR,
   SCHEDULED_CAROUSELS_DIR,
@@ -15,9 +16,12 @@ import {
 } from './post-promo.js';
 
 const SCHEDULE_FILE = 'schedule.json';
-const DEFAULT_POST_OUTRO_PATH = '/Users/admin/Documents/plug.mov';
+const DEFAULT_POST_OUTRO_PATH = process.env.CONTENT_ENGINE_POST_OUTRO_PATH || '/Users/admin/Documents/plug.mov';
 const DEFAULT_RETRY_DELAY_MS = 15 * 60 * 1000;
 const MAX_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
+const LOCK_DIR_SUFFIX = '.lock';
+const LOCK_RETRY_MS = 50;
+const LOCK_STALE_MS = 5 * 60 * 1000;
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -36,11 +40,25 @@ function safeSlug(value, fallback) {
 }
 
 function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    } catch (error) {
+      lastError = error;
+      sleepSync(LOCK_RETRY_MS * (attempt + 1));
+    }
+  }
+
+  throw new Error(`Invalid JSON in ${filePath}: ${lastError?.message || 'unknown parse error'}`);
 }
 
 function writeJson(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  ensureDir(path.dirname(filePath));
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+  fs.renameSync(tempPath, filePath);
 }
 
 function isoNow() {
@@ -53,6 +71,48 @@ function rewriteRelativePathPrefix(value, fromPrefix, toPrefix) {
     return value;
   }
   return `${toPrefix}${normalized.slice(fromPrefix.length)}`;
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function withFileLock(filePath, callback) {
+  const lockDir = `${filePath}${LOCK_DIR_SUFFIX}`;
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      fs.mkdirSync(lockDir);
+      break;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') {
+        throw error;
+      }
+
+      try {
+        const stat = fs.statSync(lockDir);
+        if ((Date.now() - stat.mtimeMs) > LOCK_STALE_MS) {
+          fs.rmSync(lockDir, { recursive: true, force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+
+      if ((Date.now() - startedAt) > LOCK_STALE_MS) {
+        throw new Error(`Timed out waiting for scheduled queue lock: ${filePath}`);
+      }
+
+      sleepSync(LOCK_RETRY_MS);
+    }
+  }
+
+  try {
+    return callback();
+  } finally {
+    fs.rmSync(lockDir, { recursive: true, force: true });
+  }
 }
 
 function manifestPlatformsForType(type, manifest) {
@@ -188,7 +248,7 @@ function isManifestFullyPosted(type, manifest) {
 }
 
 function relativeToRepo(filePath) {
-  return path.relative(ROOT_DIR, filePath);
+  return path.relative(II_ROOT, filePath);
 }
 
 function scheduleRoot(type) {
@@ -201,22 +261,30 @@ function defaultPlatforms(type) {
     : { instagram: null, x: null };
 }
 
-function loadManifestFromDir(itemDir) {
+function loadManifestFromDir(itemDir, { swallowErrors = false } = {}) {
   const manifestPath = path.join(itemDir, SCHEDULE_FILE);
   if (!fs.existsSync(manifestPath)) {
     return null;
   }
 
-  const manifest = readJson(manifestPath);
-  const changed = ensureScheduledManifestDefaults(manifest.type, manifest);
-  if (changed) {
-    writeJson(manifestPath, manifest);
+  try {
+    const manifest = readJson(manifestPath);
+    const changed = ensureScheduledManifestDefaults(manifest.type, manifest);
+    if (changed) {
+      writeJson(manifestPath, manifest);
+    }
+    return {
+      dir: itemDir,
+      manifestPath,
+      manifest,
+    };
+  } catch (error) {
+    if (swallowErrors) {
+      console.error(`Skipping invalid scheduled manifest in ${itemDir}: ${error.message}`);
+      return null;
+    }
+    throw error;
   }
-  return {
-    dir: itemDir,
-    manifestPath,
-    manifest,
-  };
 }
 
 export function listScheduledItems(type) {
@@ -225,7 +293,7 @@ export function listScheduledItems(type) {
 
   return fs.readdirSync(rootDir, { withFileTypes: true })
     .filter(entry => entry.isDirectory())
-    .map(entry => loadManifestFromDir(path.join(rootDir, entry.name)))
+    .map(entry => loadManifestFromDir(path.join(rootDir, entry.name), { swallowErrors: true }))
     .filter(Boolean)
     .sort((a, b) => {
       const aTime = a.manifest.scheduled_at || '';
@@ -254,103 +322,134 @@ export function listScheduledPlatformItems(type, platform) {
 
 export function resolveScheduledItem(type, idOrPath) {
   if (path.isAbsolute(idOrPath)) {
-    return loadManifestFromDir(idOrPath);
+    return loadManifestFromDir(idOrPath, { swallowErrors: true });
   }
 
   const direct = path.join(scheduleRoot(type), idOrPath);
   if (fs.existsSync(direct)) {
-    return loadManifestFromDir(direct);
+    return loadManifestFromDir(direct, { swallowErrors: true });
   }
 
   return null;
 }
 
-export function updateScheduledPlatformPost(type, itemDir, platform, details) {
+function lockPathForItem(itemDir) {
+  return path.join(itemDir, SCHEDULE_FILE);
+}
+
+function loadManifestForMutation(type, itemDir) {
   const item = loadManifestFromDir(itemDir);
   if (!item) {
     throw new Error(`Missing scheduled manifest in ${itemDir}`);
   }
 
-  item.manifest.posts = item.manifest.posts || defaultPlatforms(type);
   ensureQueueState(type, item.manifest);
-  item.manifest.posts[platform] = {
-    ...details,
-    platform,
-    posted_at: details.posted_at || isoNow(),
-  };
-  item.manifest.queue.platforms[platform] = {
-    ...item.manifest.queue.platforms[platform],
-    status: 'posted',
-    posted_at: item.manifest.posts[platform].posted_at,
-    last_attempt_at: item.manifest.posts[platform].posted_at,
-    next_attempt_at: null,
-    last_error: null,
-  };
-  item.manifest.queue.overall.status = isManifestFullyPosted(type, item.manifest) ? 'posted' : 'queued';
+  return item;
+}
 
-  writeJson(item.manifestPath, item.manifest);
+export function resolvePostOutroPath(manifest = {}) {
+  const configured = String(
+    manifest?.post_defaults?.outro_path
+    || process.env.CONTENT_ENGINE_POST_OUTRO_PATH
+    || DEFAULT_POST_OUTRO_PATH,
+  ).trim();
 
-  if (type === 'video' && isManifestFullyPosted(type, item.manifest)) {
-    return archiveScheduledVideoItem(item.dir);
+  if (!configured) {
+    return '';
   }
 
-  return item.manifest;
+  return path.isAbsolute(configured)
+    ? configured
+    : path.join(ROOT_DIR, configured);
+}
+
+export function updateScheduledPlatformPost(type, itemDir, platform, details) {
+  let shouldArchive = false;
+  const manifest = withFileLock(lockPathForItem(itemDir), () => {
+    const item = loadManifestForMutation(type, itemDir);
+    item.manifest.posts = item.manifest.posts || defaultPlatforms(type);
+    item.manifest.posts[platform] = {
+      ...details,
+      platform,
+      posted_at: details.posted_at || isoNow(),
+    };
+    item.manifest.queue.platforms[platform] = {
+      ...item.manifest.queue.platforms[platform],
+      status: 'posted',
+      posted_at: item.manifest.posts[platform].posted_at,
+      last_attempt_at: item.manifest.posts[platform].posted_at,
+      next_attempt_at: null,
+      last_error: null,
+    };
+    item.manifest.queue.overall.status = isManifestFullyPosted(type, item.manifest) ? 'posted' : 'queued';
+    writeJson(item.manifestPath, item.manifest);
+    shouldArchive = type === 'video' && isManifestFullyPosted(type, item.manifest);
+    return item.manifest;
+  });
+
+  if (shouldArchive) {
+    return archiveScheduledVideoItem(itemDir);
+  }
+
+  return manifest;
 }
 
 export function archiveScheduledVideoItem(itemDir) {
-  const item = loadManifestFromDir(itemDir);
-  if (!item) {
-    throw new Error(`Missing scheduled manifest in ${itemDir}`);
-  }
+  return withFileLock(lockPathForItem(itemDir), () => {
+    const item = loadManifestFromDir(itemDir);
+    if (!item) {
+      throw new Error(`Missing scheduled manifest in ${itemDir}`);
+    }
 
-  ensureDir(POSTED_VIDEOS_DIR);
+    ensureDir(POSTED_VIDEOS_DIR);
 
-  const slug = path.basename(item.dir);
-  const targetDir = path.join(POSTED_VIDEOS_DIR, slug);
-  const oldRelativeDir = relativeToRepo(item.dir);
-  const newRelativeDir = relativeToRepo(targetDir);
+    const slug = path.basename(item.dir);
+    const targetDir = path.join(POSTED_VIDEOS_DIR, slug);
+    const oldRelativeDir = relativeToRepo(item.dir);
+    const newRelativeDir = relativeToRepo(targetDir);
 
-  fs.rmSync(targetDir, { recursive: true, force: true });
-  fs.renameSync(item.dir, targetDir);
+    fs.rmSync(targetDir, { recursive: true, force: true });
+    fs.renameSync(item.dir, targetDir);
 
-  const movedItem = loadManifestFromDir(targetDir);
-  if (!movedItem) {
-    throw new Error(`Archived scheduled video is missing its manifest: ${targetDir}`);
-  }
+    const movedItem = loadManifestFromDir(targetDir);
+    if (!movedItem) {
+      throw new Error(`Archived scheduled video is missing its manifest: ${targetDir}`);
+    }
 
-  const manifest = movedItem.manifest;
-  manifest.archived_from_queue_at = isoNow();
-  manifest.queue_status = 'posted';
-  manifest.archived_from = oldRelativeDir;
-  ensureQueueState('video', manifest);
-  manifest.queue.overall.status = 'posted';
+    const manifest = movedItem.manifest;
+    manifest.archived_from_queue_at = isoNow();
+    manifest.queue_status = 'posted';
+    manifest.archived_from = oldRelativeDir;
+    ensureQueueState('video', manifest);
+    manifest.queue.overall.status = 'posted';
 
-  if (manifest.assets) {
-    for (const [key, value] of Object.entries(manifest.assets)) {
-      if (typeof value === 'string') {
-        manifest.assets[key] = rewriteRelativePathPrefix(value, oldRelativeDir, newRelativeDir);
+    if (manifest.assets) {
+      for (const [key, value] of Object.entries(manifest.assets)) {
+        if (typeof value === 'string') {
+          manifest.assets[key] = rewriteRelativePathPrefix(value, oldRelativeDir, newRelativeDir);
+        }
       }
     }
-  }
 
-  if (manifest.posts && typeof manifest.posts === 'object') {
-    for (const post of Object.values(manifest.posts)) {
-      if (post && typeof post === 'object' && typeof post.source_file === 'string') {
-        post.source_file = rewriteRelativePathPrefix(post.source_file, oldRelativeDir, newRelativeDir);
+    if (manifest.posts && typeof manifest.posts === 'object') {
+      for (const post of Object.values(manifest.posts)) {
+        if (post && typeof post === 'object' && typeof post.source_file === 'string') {
+          post.source_file = rewriteRelativePathPrefix(post.source_file, oldRelativeDir, newRelativeDir);
+        }
       }
     }
-  }
 
-  if (manifest.queue?.platforms && typeof manifest.queue.platforms === 'object') {
-    for (const state of Object.values(manifest.queue.platforms)) {
-      if (state && typeof state === 'object' && typeof state.prepared_video_path === 'string') {
-        state.prepared_video_path = rewriteRelativePathPrefix(state.prepared_video_path, oldRelativeDir, newRelativeDir);
+    if (manifest.queue?.platforms && typeof manifest.queue.platforms === 'object') {
+      for (const state of Object.values(manifest.queue.platforms)) {
+        if (state && typeof state === 'object' && typeof state.prepared_video_path === 'string') {
+          state.prepared_video_path = rewriteRelativePathPrefix(state.prepared_video_path, oldRelativeDir, newRelativeDir);
+        }
       }
     }
-  }
 
-  writeJson(movedItem.manifestPath, manifest);
-  return manifest;
+    writeJson(movedItem.manifestPath, manifest);
+    return manifest;
+  });
 }
 
 function detectVideoAssets(sourceDir) {
@@ -377,15 +476,15 @@ function copyFileIfPresent(fromPath, toPath) {
   }
 }
 
-function appendPostOutro(sourceVideoPath, targetVideoPath) {
-  if (!fs.existsSync(DEFAULT_POST_OUTRO_PATH)) {
-    throw new Error(`Required post outro clip not found: ${DEFAULT_POST_OUTRO_PATH}`);
+function appendPostOutro(sourceVideoPath, targetVideoPath, outroPath) {
+  if (!fs.existsSync(outroPath)) {
+    throw new Error(`Required post outro clip not found: ${outroPath}`);
   }
 
   execFileSync('ffmpeg', [
     '-y',
     '-i', sourceVideoPath,
-    '-i', DEFAULT_POST_OUTRO_PATH,
+    '-i', outroPath,
     '-filter_complex', '[0:v:0][0:a:0][1:v:0][1:a:0]concat=n=2:v=1:a=1[v][a]',
     '-map', '[v]',
     '-map', '[a]',
@@ -404,19 +503,19 @@ function resolveQueuedVideoSource(item) {
   const candidates = [];
   const sourceFolder = item?.manifest?.source?.folder;
   if (sourceFolder) {
-    const sourceDir = path.join(ROOT_DIR, sourceFolder);
+    const sourceDir = path.join(II_ROOT, sourceFolder);
     const baseName = path.basename(sourceDir);
     candidates.push(path.join(sourceDir, `${baseName}.mp4`));
   }
 
   const rawVideoPath = item?.manifest?.assets?.raw_video_path;
   if (rawVideoPath) {
-    candidates.push(path.join(ROOT_DIR, rawVideoPath));
+    candidates.push(path.join(II_ROOT, rawVideoPath));
   }
 
   const queuedVideoPath = item?.manifest?.assets?.video_path;
   if (queuedVideoPath) {
-    candidates.push(path.join(ROOT_DIR, queuedVideoPath));
+    candidates.push(path.join(II_ROOT, queuedVideoPath));
   }
 
   return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
@@ -437,19 +536,31 @@ export function prepareScheduledVideoForPlatform(item, platform) {
   const preparedDir = path.join(item.dir, 'platform-renders', platform);
   ensureDir(preparedDir);
   const preparedPath = path.join(preparedDir, `${item.manifest.id}-${platform}.mp4`);
-  appendPostOutro(sourceVideoPath, preparedPath);
+  const shouldAppendOutro = item.manifest?.post_defaults?.append_outro_before_post !== false;
+  const outroPath = resolvePostOutroPath(item.manifest);
+
+  if (shouldAppendOutro) {
+    appendPostOutro(sourceVideoPath, preparedPath, outroPath);
+  } else {
+    fs.copyFileSync(sourceVideoPath, preparedPath);
+  }
 
   const preparedAt = isoNow();
-  item.manifest.queue.platforms[platform] = {
-    ...item.manifest.queue.platforms[platform],
-    status: 'prepared',
-    prepared_video_path: relativeToRepo(preparedPath),
-    last_attempt_at: preparedAt,
-    next_attempt_at: preparedAt,
-    last_error: null,
-  };
-  item.manifest.queue.overall.last_prepared_at = preparedAt;
-  writeJson(item.manifestPath, item.manifest);
+  withFileLock(lockPathForItem(item.dir), () => {
+    const freshItem = loadManifestForMutation('video', item.dir);
+    freshItem.manifest.queue.platforms[platform] = {
+      ...freshItem.manifest.queue.platforms[platform],
+      status: 'prepared',
+      prepared_video_path: relativeToRepo(preparedPath),
+      last_attempt_at: preparedAt,
+      next_attempt_at: preparedAt,
+      last_error: null,
+    };
+    freshItem.manifest.queue.overall.last_prepared_at = preparedAt;
+    writeJson(freshItem.manifestPath, freshItem.manifest);
+    item.manifest = freshItem.manifest;
+    item.manifestPath = freshItem.manifestPath;
+  });
 
   return {
     ...item,
@@ -459,28 +570,25 @@ export function prepareScheduledVideoForPlatform(item, platform) {
 }
 
 export function recordScheduledPlatformFailure(type, itemDir, platform, error) {
-  const item = loadManifestFromDir(itemDir);
-  if (!item) {
-    throw new Error(`Missing scheduled manifest in ${itemDir}`);
-  }
+  return withFileLock(lockPathForItem(itemDir), () => {
+    const item = loadManifestForMutation(type, itemDir);
+    const now = Date.now();
+    const state = item.manifest.queue.platforms[platform] || defaultQueueState(type, item.manifest).platforms[platform];
+    const retryCount = (Number(state.retry_count) || 0) + 1;
+    const nextAttemptAt = new Date(now + retryDelayMs(retryCount)).toISOString();
 
-  ensureQueueState(type, item.manifest);
-  const now = Date.now();
-  const state = item.manifest.queue.platforms[platform] || defaultQueueState(type, item.manifest).platforms[platform];
-  const retryCount = (Number(state.retry_count) || 0) + 1;
-  const nextAttemptAt = new Date(now + retryDelayMs(retryCount)).toISOString();
+    item.manifest.queue.platforms[platform] = {
+      ...state,
+      status: 'failed',
+      retry_count: retryCount,
+      last_attempt_at: new Date(now).toISOString(),
+      next_attempt_at: nextAttemptAt,
+      last_error: String(error?.message || error || 'Unknown posting error'),
+    };
 
-  item.manifest.queue.platforms[platform] = {
-    ...state,
-    status: 'failed',
-    retry_count: retryCount,
-    last_attempt_at: new Date(now).toISOString(),
-    next_attempt_at: nextAttemptAt,
-    last_error: String(error?.message || error || 'Unknown posting error'),
-  };
-
-  writeJson(item.manifestPath, item.manifest);
-  return item.manifest;
+    writeJson(item.manifestPath, item.manifest);
+    return item.manifest;
+  });
 }
 
 export function scheduleVideo(sourceDir, options = {}) {

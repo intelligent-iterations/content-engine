@@ -9,6 +9,7 @@ import {
   ensureInstagramLoggedIn,
   saveCookies,
 } from './instagram-auth.js';
+import { II_ROOT } from '../core/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -122,11 +123,11 @@ async function extractPermalink(page, username, caption) {
 
 async function saveDebugScreenshot(page, label) {
   try {
-    const debugDir = path.join(REPO_ROOT, 'output', 'debug');
+    const debugDir = path.join(II_ROOT, 'debug');
     fs.mkdirSync(debugDir, { recursive: true });
     const filename = `instagram-${label}-${Date.now()}.png`;
     await page.screenshot({ path: path.join(debugDir, filename), fullPage: false });
-    console.log(`  [debug] Screenshot saved: output/debug/${filename}`);
+    console.log(`  [debug] Screenshot saved: ${path.join(debugDir, filename)}`);
     return filename;
   } catch {
     return null;

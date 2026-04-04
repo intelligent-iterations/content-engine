@@ -6,6 +6,7 @@ ENV CONTENT_GEN_DISABLE_BROWSER_SANDBOX=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
+    ffmpeg \
     python3 \
     python3-pip \
     ca-certificates \

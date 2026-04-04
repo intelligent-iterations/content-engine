@@ -17,7 +17,7 @@ const TIKTOK_HEIGHT = 1920;
 const INSTAGRAM_WIDTH = 1080;
 const INSTAGRAM_HEIGHT = 1350;
 
-// Height to crop
+// Height to crop from the canonical 9:16 source
 const CROP_AMOUNT = TIKTOK_HEIGHT - INSTAGRAM_HEIGHT; // 570px
 
 // Original text Y positions (from add-text-overlay.js SAFE_ZONES)
@@ -38,8 +38,10 @@ const RULE_OF_THIRDS = {
  * @param {string} textPosition - 'top', 'center', or 'bottom-safe'
  * @returns {object} - { top, left, width, height } for sharp extract
  */
-function calculateCrop(textPosition) {
-  const originalY = TEXT_POSITIONS[textPosition] || TEXT_POSITIONS.top;
+function calculateCrop(textPosition, sourceHeight = TIKTOK_HEIGHT) {
+  const cropAmount = Math.max(0, sourceHeight - INSTAGRAM_HEIGHT);
+  const scale = sourceHeight / TIKTOK_HEIGHT;
+  const originalY = (TEXT_POSITIONS[textPosition] || TEXT_POSITIONS.top) * scale;
 
   // Determine which rule of thirds line to target
   let targetY;
@@ -61,13 +63,23 @@ function calculateCrop(textPosition) {
   }
 
   // Clamp topCrop to valid range [0, CROP_AMOUNT]
-  topCrop = Math.max(0, Math.min(CROP_AMOUNT, topCrop));
+  topCrop = Math.max(0, Math.min(cropAmount, topCrop));
 
   return {
     left: 0,
-    top: topCrop,
+    top: Math.round(topCrop),
     width: INSTAGRAM_WIDTH,
     height: INSTAGRAM_HEIGHT
+  };
+}
+
+async function copyImage(inputPath, outputPath) {
+  fs.copyFileSync(inputPath, outputPath);
+  return {
+    left: 0,
+    top: 0,
+    width: INSTAGRAM_WIDTH,
+    height: INSTAGRAM_HEIGHT,
   };
 }
 
@@ -78,9 +90,34 @@ function calculateCrop(textPosition) {
  * @param {string} textPosition - Text position from metadata
  */
 async function cropImage(inputPath, outputPath, textPosition) {
-  const crop = calculateCrop(textPosition);
+  const image = sharp(inputPath);
+  const metadata = await image.metadata();
+  const sourceWidth = Number(metadata.width) || INSTAGRAM_WIDTH;
+  const sourceHeight = Number(metadata.height) || INSTAGRAM_HEIGHT;
 
-  await sharp(inputPath)
+  if (sourceWidth === INSTAGRAM_WIDTH && sourceHeight === INSTAGRAM_HEIGHT) {
+    return copyImage(inputPath, outputPath);
+  }
+
+  if (sourceHeight <= INSTAGRAM_HEIGHT) {
+    await image
+      .resize(INSTAGRAM_WIDTH, INSTAGRAM_HEIGHT, {
+        fit: 'cover',
+        position: 'centre',
+      })
+      .toFile(outputPath);
+
+    return {
+      left: 0,
+      top: 0,
+      width: INSTAGRAM_WIDTH,
+      height: INSTAGRAM_HEIGHT,
+    };
+  }
+
+  const crop = calculateCrop(textPosition, sourceHeight);
+
+  await image
     .extract(crop)
     .toFile(outputPath);
 
@@ -106,9 +143,16 @@ async function processSlideshow(folderPath) {
   if (!fs.existsSync(instagramFolder)) {
     fs.mkdirSync(instagramFolder, { recursive: true });
   }
+  for (const file of fs.readdirSync(instagramFolder)) {
+    if (/^slide_\d+\.(jpg|png)$/i.test(file) || file === 'metadata.json') {
+      fs.rmSync(path.join(instagramFolder, file), { force: true });
+    }
+  }
 
   console.log(`\nProcessing: ${metadata.topic}`);
   console.log(`Output: ${instagramFolder}`);
+
+  const cropBySlide = new Map();
 
   // Process each slide
   for (const slide of metadata.slides) {
@@ -140,22 +184,30 @@ async function processSlideshow(folderPath) {
     // For screenshots (no text), do a centered crop
     let crop;
     if (isScreenshotSlide) {
-      // Center crop for screenshots
-      const topCrop = Math.floor(CROP_AMOUNT / 2); // 285px from top and bottom
-      crop = {
-        left: 0,
-        top: topCrop,
-        width: INSTAGRAM_WIDTH,
-        height: INSTAGRAM_HEIGHT
-      };
+      const image = sharp(inputFile);
+      const sourceMeta = await image.metadata();
+      const sourceHeight = Number(sourceMeta.height) || INSTAGRAM_HEIGHT;
 
-      await sharp(inputFile)
-        .extract(crop)
-        .toFile(outputFile);
+      if (sourceHeight <= INSTAGRAM_HEIGHT) {
+        crop = await copyImage(inputFile, outputFile);
+      } else {
+        const topCrop = Math.floor((sourceHeight - INSTAGRAM_HEIGHT) / 2);
+        crop = {
+          left: 0,
+          top: topCrop,
+          width: INSTAGRAM_WIDTH,
+          height: INSTAGRAM_HEIGHT
+        };
+
+        await image
+          .extract(crop)
+          .toFile(outputFile);
+      }
     } else {
       crop = await cropImage(inputFile, outputFile, textPosition);
     }
 
+    cropBySlide.set(slideNum, crop);
     console.log(`  Slide ${slideNum}: ${textPosition || 'screenshot'} → crop top ${crop.top}px`);
   }
 
@@ -167,9 +219,10 @@ async function processSlideshow(folderPath) {
     slides: metadata.slides.map(slide => {
       const textPosition = slide.text_position || 'top';
       const isScreenshot = !slide.text_overlay;
-      const crop = isScreenshot
-        ? { top: Math.floor(CROP_AMOUNT / 2) }
-        : calculateCrop(textPosition);
+      const crop = cropBySlide.get(slide.slide_number)
+        || (isScreenshot
+          ? { top: Math.floor(CROP_AMOUNT / 2) }
+          : calculateCrop(textPosition));
 
       return {
         ...slide,

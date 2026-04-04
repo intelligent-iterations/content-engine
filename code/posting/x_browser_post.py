@@ -28,6 +28,7 @@ from zendriver.core.config import Config as ZDConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 COOKIE_FILE = REPO_ROOT / "cookies" / "x_cookies.json"
+II_ROOT = Path(os.environ.get("II_ROOT", str(Path.home() / "ii" / "content-engine")))
 CHROME_PATH_MACOS = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 CHROMIUM_PATH_LINUX = "/usr/bin/chromium"
 
@@ -70,13 +71,13 @@ async def sleep_brief(seconds=1.5):
 
 async def save_debug_screenshot(page, label):
     try:
-        debug_dir = REPO_ROOT / "output" / "debug"
+        debug_dir = II_ROOT / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
         import time
         filename = f"x-{label}-{int(time.time())}.png"
         filepath = debug_dir / filename
         await page.save_screenshot(filepath, format="png")
-        print(f"  [debug] Screenshot saved: output/debug/{filename}", file=sys.stderr)
+        print(f"  [debug] Screenshot saved: {filepath}", file=sys.stderr)
         return str(filepath)
     except Exception as e:
         print(f"  [debug] Screenshot failed: {e}", file=sys.stderr)

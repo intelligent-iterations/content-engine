@@ -3,6 +3,7 @@ import path from 'path';
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { II_ROOT } from '../core/paths.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,11 +24,11 @@ function chromiumLaunchOptions(headless) {
 
 async function saveDebugScreenshot(page, label) {
   try {
-    const debugDir = path.join(REPO_ROOT, 'output', 'debug');
+    const debugDir = path.join(II_ROOT, 'debug');
     fs.mkdirSync(debugDir, { recursive: true });
     const filename = `x-${label}-${Date.now()}.png`;
     await page.screenshot({ path: path.join(debugDir, filename), fullPage: false });
-    console.log(`  [debug] Screenshot saved: output/debug/${filename}`);
+    console.log(`  [debug] Screenshot saved: ${path.join(debugDir, filename)}`);
     return filename;
   } catch {
     return null;
@@ -102,6 +103,13 @@ function captionFingerprint(text, maxLength = 60) {
     .slice(0, maxLength);
 }
 
+function hasTransientComposerError(bodyText) {
+  const normalized = String(bodyText || '').toLowerCase();
+  return normalized.includes('something went wrong')
+    || normalized.includes('let’s give it another shot')
+    || normalized.includes("let's give it another shot");
+}
+
 async function extractUsername(page) {
   const href = await page.evaluate(() => {
     const profileLink = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
@@ -144,7 +152,11 @@ async function attachMedia(page, mediaPaths) {
   const input = page.locator('input[type="file"]').first();
   await input.waitFor({ timeout: 30000 });
   await input.setInputFiles(mediaPaths);
-  await page.waitForTimeout(4000);
+  await page.waitForFunction((expectedCount) => {
+    const previews = document.querySelectorAll('img[src*="media"], video, [data-testid="attachments"] img');
+    return previews.length >= expectedCount;
+  }, mediaPaths.length, { timeout: 60000 }).catch(() => {});
+  await waitForComposerToSettle(page);
 }
 
 async function waitForSubmitEnabled(page, timeoutMs = 180000) {
@@ -159,54 +171,80 @@ async function waitForSubmitEnabled(page, timeoutMs = 180000) {
   }, { timeout: timeoutMs });
 }
 
+async function waitForComposerToSettle(page, timeoutMs = 120000) {
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector('[aria-label="Drafts"]')?.closest('[role="dialog"]');
+    const root = dialog || document.body;
+    const bodyText = String(root?.innerText || '').toLowerCase();
+    const hasBusyUi = Boolean(root?.querySelector('[role="progressbar"], [aria-busy="true"]'));
+    const hasUploadText = /uploading|processing|finalizing/i.test(bodyText);
+    return !hasBusyUi && !hasUploadText;
+  }, { timeout: timeoutMs }).catch(() => {});
+
+  await page.waitForTimeout(3000);
+}
+
 async function findPostedStatusUrl(page, username, expectedText) {
   const expected = captionFingerprint(expectedText, 40);
   if (!username) {
     return '';
   }
 
-  await page.goto(`https://x.com/${username}`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 60000,
-  });
-  await page.waitForTimeout(5000);
+  const lookupPage = await page.context().newPage();
 
-  return page.evaluate((needle) => {
-    const articles = Array.from(document.querySelectorAll('article'));
-    for (const article of articles) {
-      const text = String(article.innerText || '').toLowerCase();
-      if (!text.includes(needle)) {
-        continue;
+  try {
+    await lookupPage.goto(`https://x.com/${username}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    });
+    await lookupPage.waitForTimeout(5000);
+
+    return await lookupPage.evaluate((needle) => {
+      const articles = Array.from(document.querySelectorAll('article'));
+      for (const article of articles) {
+        const text = String(article.innerText || '').toLowerCase();
+        if (!text.includes(needle)) {
+          continue;
+        }
+        const link = article.querySelector('a[href*="/status/"]');
+        if (link) {
+          return link.href || link.getAttribute('href') || '';
+        }
       }
-      const link = article.querySelector('a[href*="/status/"]');
-      if (link) {
-        return link.href || link.getAttribute('href') || '';
-      }
-    }
-    return '';
-  }, expected).then(normalizeXUrl).catch(() => '');
+      return '';
+    }, expected).then(normalizeXUrl).catch(() => '');
+  } finally {
+    await lookupPage.close().catch(() => {});
+  }
 }
 
 async function submitPost(page, expectedText, username) {
-  const submitButton = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').first();
   let lastError = '';
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const submitButton = page.locator('[data-testid="tweetButton"], [data-testid="tweetButtonInline"]').first();
+    await submitButton.waitFor({ timeout: 30000 });
     await submitButton.click();
     console.log(`  [debug] Submit attempt ${attempt}`);
     await page.waitForTimeout(10000);
     await saveDebugScreenshot(page, `05-after-submit-${attempt}`);
 
-    const body = await page.locator('body').innerText().catch(() => '');
-    if (/something went wrong/i.test(body)) {
-      lastError = 'X composer returned a transient submit error';
-      console.log(`  [debug] Submit error after attempt ${attempt}`);
-      continue;
-    }
-
     const currentUrl = page.url();
     if (/\/status\//.test(currentUrl)) {
       return normalizeXUrl(currentUrl);
+    }
+
+    const body = await page.locator('body').innerText().catch(() => '');
+    if (hasTransientComposerError(body)) {
+      lastError = 'X composer returned a transient submit error';
+      console.log(`  [debug] Submit error after attempt ${attempt}`);
+      await page.waitForTimeout(12000);
+      const delayedProfileStatusUrl = await findPostedStatusUrl(page, username, expectedText);
+      if (delayedProfileStatusUrl) {
+        return delayedProfileStatusUrl;
+      }
+      await waitForComposerToSettle(page, 30000);
+      continue;
     }
 
     const profileStatusUrl = await findPostedStatusUrl(page, username, expectedText);
@@ -270,3 +308,6 @@ export async function postToXViaBrowser({ text, mediaPaths = [], headless = true
     await browser.close();
   }
 }
+
+export { hasTransientComposerError };
+export { findPostedStatusUrl };

@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
+import { II_ROOT, SCHEDULED_CAROUSELS_DIR } from '../core/paths.js';
 import { resolveScheduledItem, updateScheduledPlatformPost } from '../shared/scheduled-queue.js';
 import { postToInstagramViaBrowser } from './instagram-browser-post.js';
 
@@ -118,7 +118,7 @@ async function postToInstagram(folderPath) {
   updateScheduledPlatformPost('carousel', resolvedFolder, 'instagram', {
     post_id: result.postId,
     permalink: result.postUrl,
-    source_file: path.relative(REPO_ROOT, resolvedFolder),
+    source_file: path.relative(II_ROOT, resolvedFolder),
   });
 
   return result;

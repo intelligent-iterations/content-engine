@@ -21,6 +21,7 @@ import {
   updateScheduledPlatformPost,
 } from '../shared/scheduled-queue.js';
 import { normalizeCaptionForPosting } from '../shared/post-promo.js';
+import { II_ROOT } from '../core/paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, '..', '..');
@@ -38,17 +39,17 @@ async function postOneVideo(item) {
   const prepared = prepareScheduledVideoForPlatform(item, PLATFORM);
   const videoFilePath = prepared.preparedVideoPath;
   if (!fs.existsSync(videoFilePath)) {
-    console.error(`  File not found: ${path.relative(REPO_ROOT, videoFilePath)}`);
+    console.error(`  File not found: ${path.relative(II_ROOT, videoFilePath)}`);
     return null;
   }
 
   const fileSizeMB = (fs.statSync(videoFilePath).size / (1024 * 1024)).toFixed(1);
-  console.log(`  File: ${path.relative(REPO_ROOT, videoFilePath)} (${fileSizeMB} MB)`);
+  console.log(`  File: ${path.relative(II_ROOT, videoFilePath)} (${fileSizeMB} MB)`);
 
   // Load caption
   let caption = normalizeCaptionForPosting(`${video.id} #content #video`);
   if (video.assets.caption_path) {
-    const captionFilePath = path.join(REPO_ROOT, video.assets.caption_path);
+    const captionFilePath = path.join(II_ROOT, video.assets.caption_path);
     if (fs.existsSync(captionFilePath)) {
       caption = normalizeCaptionForPosting(fs.readFileSync(captionFilePath, 'utf-8'));
       console.log(`  Caption loaded (${caption.length} chars)`);

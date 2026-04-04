@@ -1110,6 +1110,458 @@
       "dialogue_examples": [
         "\"ah.\""
       ]
+    },
+    {
+      "id": "bathroom-renovation-before-after-promo",
+      "label": "Bathroom Renovation Before/After Promo",
+      "description": "Photorealistic single-clip bathroom transformation promo built around a continuity-locked interior frame, realistic construction-grade design details, and smartphone-style camera naturalism.",
+      "contract_version": 1,
+      "rule_profile": "promo",
+      "caption_profile": "promo",
+      "prompting_profile": "grok_bathroom_renovation_before_after_promo",
+      "clip_count": 1,
+      "clip_duration_seconds": 6,
+      "target_length_seconds": 6,
+      "reference_strategy": "shared_reference",
+      "aspect_ratio": "9:16",
+      "resolution": "720p",
+      "image_model": "grok-imagine-image",
+      "video_model": "grok-imagine-video",
+      "format_hint": "single-shot photoreal bathroom renovation reveal for a construction company, starting from an ordinary dated bathroom and landing on a premium remodeled after state with believable iPhone-style handheld camera realism",
+      "ordering_strategy": "establish the dated bathroom, push forward through the remodel reveal, land on the finished premium after state",
+      "voice_direction": "default to no dialogue, no cinematic trailer language, no glossy commercial polish, and no impossible camera behavior. The clip should feel like a real homeowner or contractor filmed the reveal on an iPhone in available light.",
+      "research_notes": [
+        "Photoreal results improve when the prompt specifies ordinary smartphone framing, practical interior lighting, and believable material imperfections instead of generic hyperreal adjectives alone.",
+        "Before/after transformation prompts work better when the before state and after state are described with concrete fixtures, finishes, and lighting changes rather than abstract quality words.",
+        "For realism, preserve one locked room layout across the transformation: same vanity wall, same toilet placement, same shower footprint, and the same camera axis.",
+        "A subtle handheld step-in or doorway push feels more like an iPhone capture than a floating cinematic move.",
+        "Avoid over-stylized lens terms; emphasize natural exposure shifts, slight handheld micro-jitter, realistic white balance, and everyday renovation details."
+      ],
+      "creative_direction": [
+        "Use a small, believable residential bathroom rather than a huge luxury spa set.",
+        "Make the before state clearly older and worn but still physically plausible: dated vanity, yellowish light, old tile, cramped styling, minor clutter.",
+        "Make the after state premium but grounded: bright neutral tile, frameless glass shower, matte black fixtures, floating vanity, clean mirror lighting, realistic reflections.",
+        "Keep materials honest and tactile with grout lines, subtle scuffs, natural reflections, and non-perfect symmetry."
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "author a single-beat promo markdown from saved repo state",
+          "generate one continuity-safe scene start frame that locks the bathroom layout and camera angle",
+          "animate one dominant before-to-after transformation beat with realistic handheld smartphone motion",
+          "save the research artifact, markdown, caption, asset manifest, plans, clips, and final output together in the run folder"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card with image-first layout locking"
+      },
+      "video_execution_contract": {
+        "builder_version": 1,
+        "lines": {
+          "preamble": [
+            "Create a vertical 9:16 photoreal video clip.",
+            "Target duration: {{clip_duration_seconds}} seconds.",
+            "Treat the following image direction as the opening frame and room layout to preserve.",
+            "Continuity is more important than novelty or extra detail.",
+            "Keep the exact same bathroom layout, camera axis, and material logic established by the image direction and continuity anchors.",
+            "The camera should feel like a real recent iPhone handheld capture: natural exposure, subtle handheld micro-movement, realistic auto white-balance behavior, and no impossible floating drone motion.",
+            "Do not stylize the room into CGI showroom fantasy, ultra-wide architecture render distortion, or cinematic luxury-ad gloss."
+          ],
+          "image_direction_header": "IMAGE DIRECTION:",
+          "continuity_header": "CONTINUITY ANCHORS:",
+          "default_continuity_anchors": "Preserve the same bathroom layout, camera angle, and realism established by the image prompt.",
+          "motion_intro": "Animate that exact room using this reveal direction:",
+          "video_direction_header": "VIDEO DIRECTION:",
+          "speaker_named": "Only {{speaker}} may deliver the spoken line in this clip.",
+          "speaker_none": "If speech is not clearly required, prefer no dialogue.",
+          "speaker_lock_named": "Speaker lock: {{speaker}} is the only source allowed to deliver audible speech.",
+          "speaker_lock_none": "Prefer no speech over assigning a voice awkwardly.",
+          "silent_characters_named": "{{silent_characters}} stay silent and must not mouth, narrate, or appear to say the line.",
+          "silent_characters_none": "Any visible people stay silent unless the prompt explicitly says otherwise.",
+          "dialogue_named": "Use exactly this spoken line: \"{{dialogue}}\"",
+          "dialogue_none": "Use no spoken dialogue unless the motion direction explicitly requires it.",
+          "wrong_speaker_failsafe_named": "If the line cannot be cleanly assigned to {{speaker}}, output no audible dialogue instead.",
+          "wrong_speaker_failsafe_none": "Do not add random narration or a wrong speaking source.",
+          "staging_named": "Keep staging clear so {{speaker}} is the obvious readable source if speech occurs.",
+          "staging_none": "Keep the reveal visually clear and legible with no confusion about what changed in the room.",
+          "action_none": "Keep one dominant visible action.",
+          "ending": [
+            "Keep the transformation and final room details clear on a phone screen.",
+            "Output a single finished video clip."
+          ]
+        }
+      },
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the one-shot construction promo concept, what makes the before/after transition readable, and why the camera should feel like a real iPhone walkthrough instead of a glossy ad.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Before Lock",
+          "instruction": "Define the dated bathroom before state with concrete details: vanity, mirror, tile, lighting, clutter level, proportions, and any imperfections that support realism.",
+          "required": true,
+          "min_words": 45
+        },
+        {
+          "title": "After Lock",
+          "instruction": "Define the remodeled after state with concrete construction details: vanity, shower, tile, fixtures, lighting, reflections, and finish quality. Keep it premium but plausible.",
+          "required": true,
+          "min_words": 45
+        },
+        {
+          "title": "Camera and Realism Lock",
+          "instruction": "Specify the smartphone-style camera feel, focal behavior, handheld motion, lighting realism, exposure behavior, and the layout elements that must stay locked through the transformation.",
+          "required": true,
+          "min_words": 45
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Record the scene start frame and any other references needed before rendering. Explain how the opening frame locks the room layout so the before/after transition remains believable.",
+          "required": true,
+          "min_words": 35
+        }
+      ],
+      "asset_contract": {
+        "requires_character_assets": false,
+        "requires_scene_start_frames": true,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": false,
+        "requires_locked_wardrobe": false,
+        "requires_role_assignment": false,
+        "minimum_cast_size": 0,
+        "role_blueprint": []
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "single before-to-after reveal"
+        ],
+        "scene_prompt_strategy": "the clip should open on a continuity-locked dated bathroom and transform within the same camera move into a finished remodel with realistic smartphone movement and believable material upgrades"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "room layout",
+          "camera axis and framing",
+          "vanity and shower placement",
+          "material realism and reflections",
+          "lighting direction and white balance",
+          "overall smartphone-captured look"
+        ]
+      },
+      "video_examples": [
+        "The shot should feel like someone standing in the doorway and stepping in slightly as the dated bathroom upgrades into the finished remodel.",
+        "The reveal should preserve the same sink wall, toilet position, and shower footprint so the transformation reads as one real renovation.",
+        "The final second should hold long enough for viewers to read the upgraded vanity, tile, mirror lighting, and frameless shower glass."
+      ],
+      "dialogue_examples": [
+        "\"\""
+      ]
+    },
+    {
+      "id": "bathroom-pov-walkthrough-promo",
+      "label": "Bathroom POV Walkthrough Promo",
+      "description": "Photorealistic POV walkthrough of a middle-income household bathroom, built around one locked residential layout, smartphone-style camera movement, and continuity-safe before or after renovation states.",
+      "contract_version": 1,
+      "rule_profile": "promo",
+      "caption_profile": "promo",
+      "prompting_profile": "grok_bathroom_pov_walkthrough_promo",
+      "clip_count": 1,
+      "clip_duration_seconds": 10,
+      "target_length_seconds": 10,
+      "reference_strategy": "shared_reference",
+      "aspect_ratio": "9:16",
+      "resolution": "720p",
+      "image_model": "grok-imagine-image",
+      "video_model": "grok-imagine-video",
+      "format_hint": "single-shot photoreal POV walkthrough of a realistic middle-income household bathroom, captured like a homeowner or contractor walking in with an iPhone and slowly showing the space",
+      "ordering_strategy": "enter from the doorway, move through one natural smartphone walkthrough beat, and hold on the key bathroom features long enough for the room to read",
+      "voice_direction": "default to no dialogue, no narration, and no glossy luxury-ad polish. The camera should feel like a real person holding an iPhone and looking around a normal home bathroom.",
+      "research_notes": [
+        "POV realism improves when the prompt specifies natural body-driven camera bob, small stabilization corrections, and ordinary smartphone framing instead of cinematic camera jargon.",
+        "Middle-income bathroom realism comes from believable scale, practical fixtures, common finish choices, and mild imperfections rather than showroom-level perfection.",
+        "For continuity, keep the same doorway angle, vanity wall, toilet placement, and shower or tub footprint across all related shots.",
+        "A short pause on the vanity and shower area helps the room read clearly on mobile without requiring dramatic camera moves.",
+        "Subtle natural exposure changes and realistic mirror or tile reflections help the clip feel captured on a phone rather than rendered."
+      ],
+      "creative_direction": [
+        "Keep the bathroom compact and plausible, like a normal suburban or urban middle-income home.",
+        "Use ordinary materials and fixtures that feel current or dated depending on the state, but never exaggerated.",
+        "Favor human-height POV motion with restrained handheld movement over sweeping cinematic motion.",
+        "Keep the result clean and polished enough for a construction company promo while still feeling authentic."
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "author a single-beat POV walkthrough markdown from saved repo state",
+          "generate or reuse one continuity-safe scene start frame that locks the bathroom layout and camera angle",
+          "animate one realistic smartphone walkthrough beat from that locked frame",
+          "save the research artifact, markdown, caption, asset manifest, plans, clips, and final output together in the run folder"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card with image-first layout locking"
+      },
+      "video_execution_contract": {
+        "builder_version": 1,
+        "lines": {
+          "preamble": [
+            "Create a vertical 9:16 photoreal video clip.",
+            "Target duration: {{clip_duration_seconds}} seconds.",
+            "Treat the following image direction as the opening frame and room layout to preserve.",
+            "Continuity is more important than novelty or extra detail.",
+            "Keep the exact same bathroom layout, camera axis, material scale, and overall realism established by the image direction and continuity anchors.",
+            "The camera should feel like a real iPhone POV walkthrough with natural handheld body motion, subtle stabilization corrections, and believable exposure changes.",
+            "Do not turn this into a cinematic architecture reel, drone move, or glossy CGI showroom render."
+          ],
+          "image_direction_header": "IMAGE DIRECTION:",
+          "continuity_header": "CONTINUITY ANCHORS:",
+          "default_continuity_anchors": "Preserve the same bathroom layout, camera angle, and smartphone realism established by the image prompt.",
+          "motion_intro": "Animate that exact bathroom using this POV walkthrough direction:",
+          "video_direction_header": "VIDEO DIRECTION:",
+          "speaker_named": "Only {{speaker}} may deliver the spoken line in this clip.",
+          "speaker_none": "If speech is not clearly required, prefer no dialogue.",
+          "speaker_lock_named": "Speaker lock: {{speaker}} is the only source allowed to deliver audible speech.",
+          "speaker_lock_none": "Prefer no speech over assigning a voice awkwardly.",
+          "silent_characters_named": "{{silent_characters}} stay silent and must not mouth, narrate, or appear to say the line.",
+          "silent_characters_none": "Any visible people stay silent unless the prompt explicitly says otherwise.",
+          "dialogue_named": "Use exactly this spoken line: \"{{dialogue}}\"",
+          "dialogue_none": "Use no spoken dialogue unless the motion direction explicitly requires it.",
+          "wrong_speaker_failsafe_named": "If the line cannot be cleanly assigned to {{speaker}}, output no audible dialogue instead.",
+          "wrong_speaker_failsafe_none": "Do not add random narration or a wrong speaking source.",
+          "staging_named": "Keep staging clear so {{speaker}} is the obvious readable source if speech occurs.",
+          "staging_none": "Keep the walkthrough visually clear so the room layout and featured upgrades are easy to read.",
+          "action_none": "Keep one dominant visible action.",
+          "ending": [
+            "Keep the room details legible on a phone screen.",
+            "Output a single finished video clip."
+          ]
+        }
+      },
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the one-shot POV walkthrough, the bathroom state being shown, and why the shot should feel like a real iPhone capture inside a middle-income home instead of a glossy ad.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Bathroom State Lock",
+          "instruction": "Define the bathroom exactly as it appears in this run, including vanity, mirror, toilet, shower or tub, tile, lighting, scale, clutter level, and any material imperfections that support realism.",
+          "required": true,
+          "min_words": 55
+        },
+        {
+          "title": "Camera and Realism Lock",
+          "instruction": "Specify the POV camera feel, lens behavior, handheld motion, natural exposure shifts, and the layout elements that must stay fixed through the walkthrough.",
+          "required": true,
+          "min_words": 45
+        },
+        {
+          "title": "Continuity Sources",
+          "instruction": "Record which reference frame or prior run establishes the room layout, and explain how this run preserves the same doorway angle, vanity wall, toilet placement, and shower footprint.",
+          "required": true,
+          "min_words": 35
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Record the scene start frame and any references needed before rendering. Note whether the frame is reused directly or generated from another saved bathroom reference.",
+          "required": true,
+          "min_words": 30
+        }
+      ],
+      "asset_contract": {
+        "requires_character_assets": false,
+        "requires_scene_start_frames": true,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": false,
+        "requires_locked_wardrobe": false,
+        "requires_role_assignment": false,
+        "minimum_cast_size": 0,
+        "role_blueprint": []
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "single POV walkthrough"
+        ],
+        "scene_prompt_strategy": "the clip should open on a continuity-locked bathroom frame and animate one realistic human-height walkthrough beat with smartphone motion and clear room readability"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "room layout",
+          "camera axis and entry path",
+          "vanity and shower placement",
+          "fixture scale and material realism",
+          "lighting direction and white balance",
+          "overall smartphone-captured look"
+        ]
+      },
+      "video_examples": [
+        "The camera should feel like someone stepping into the doorway and slowly looking through the bathroom, not like a floating virtual camera.",
+        "The vanity, toilet, and shower area should all remain easy to read throughout the clip, even with slight handheld motion.",
+        "The final second should settle enough for the viewer to understand the room state clearly."
+      ],
+      "dialogue_examples": [
+        "\"\""
+      ]
+    },
+    {
+      "id": "neon-code-learning-montage",
+      "label": "Neon Code Learning Montage",
+      "description": "Six-beat futuristic coding explainer built around a consistent neon city world, AI-assisted development visuals, Git workflow beats, and continuity-safe stitched clips.",
+      "contract_version": 1,
+      "rule_profile": "promo",
+      "caption_profile": "promo",
+      "prompting_profile": "grok_neon_code_learning_montage",
+      "clip_count": 6,
+      "clip_duration_seconds": 6,
+      "target_length_seconds": 36,
+      "reference_strategy": "shared_reference",
+      "aspect_ratio": "9:16",
+      "resolution": "720p",
+      "image_model": "grok-imagine-image",
+      "video_model": "grok-imagine-video",
+      "format_hint": "six stitched futuristic explainer beats about learning to code with AI and Git, set inside a grounded cyberpunk neon-city world with high-clarity motion and mobile-readable composition",
+      "ordering_strategy": "hook, AI coding setup, first build, git save point, collaboration and push, futuristic payoff",
+      "voice_direction": "default to no dialogue or extremely sparse literal lines. Let the visuals, interfaces, and motion sell the idea. Prioritize clarity, continuity, and a cool but believable sci-fi feel over flashy chaos.",
+      "research_notes": [
+        "For cyberpunk or neon-city AI video, forward-only or logically progressive camera motion reduces artifacting and helps transitions feel intentional.",
+        "Scene-start frames and end-state locking are more reliable than asking one raw generation to invent a complex futuristic transition from scratch.",
+        "Futuristic coding visuals stay more readable when interface elements are implied through light, holographic panels, and hand motion rather than dense fake text blocks.",
+        "Continuity across stitched clips improves when the same protagonist silhouette, workstation palette, city-light grade, and environmental anchors persist between beats.",
+        "Educational coding montages work better when each beat has one dominant action: prompt AI, type code, save changes, branch, commit, push, review, or deploy."
+      ],
+      "creative_direction": [
+        "Keep the world cool and futuristic, but grounded enough to feel like a believable near-future city rather than abstract VFX noise.",
+        "Use neon city reflections, holographic UI glow, volumetric light, and sci-fi overlays sparingly enough that code-learning actions remain legible on a phone screen.",
+        "Favor crisp forward motion, practical handheld or shoulder-height camera logic, and one dominant beat per clip.",
+        "Make Git feel visual through branching lines, glowing commit nodes, code panes, terminal light, and collaborative handoffs rather than text-heavy screens."
+      ],
+      "workflow_contract": {
+        "required_steps": [
+          "author a six-beat coding-learning markdown from saved repo state",
+          "generate one continuity-safe scene start frame per clip to lock world design and beat composition",
+          "animate each beat as a short futuristic coding or Git action",
+          "stitch clips, burn captions if needed, and save the final run artifacts"
+        ],
+        "authoring_mode": "template-first saved artifacts",
+        "scene_generation_mode": "one scene card per clip with image-first continuity locking"
+      },
+      "video_execution_contract": {
+        "builder_version": 1,
+        "lines": {
+          "preamble": [
+            "Create a vertical 9:16 photoreal or high-end cinematic video clip.",
+            "Target duration: {{clip_duration_seconds}} seconds.",
+            "Treat the following image direction as the opening frame and world identity to preserve.",
+            "Continuity is more important than novelty or extra detail.",
+            "Keep the exact same protagonist design, workstation logic, city-light palette, environment identity, and overall realism established by the image direction and continuity anchors.",
+            "The camera should feel like a deliberate near-future explainer shot with logical forward motion, readable subject framing, and controlled sci-fi effects.",
+            "Do not turn this into random glitch chaos, unreadable fake UI spam, or an incoherent music-video montage."
+          ],
+          "image_direction_header": "IMAGE DIRECTION:",
+          "continuity_header": "CONTINUITY ANCHORS:",
+          "default_continuity_anchors": "Preserve the same protagonist, world design, workstation identity, and overall futuristic realism established by the image prompt.",
+          "motion_intro": "Animate that exact scene using this coding and motion direction:",
+          "video_direction_header": "VIDEO DIRECTION:",
+          "speaker_named": "Only {{speaker}} may deliver the spoken line in this clip.",
+          "speaker_none": "If speech is not clearly required, prefer no dialogue.",
+          "speaker_lock_named": "Speaker lock: {{speaker}} is the only source allowed to deliver audible speech.",
+          "speaker_lock_none": "Prefer no speech over assigning a voice awkwardly.",
+          "silent_characters_named": "{{silent_characters}} stay silent and must not mouth, narrate, or appear to say the line.",
+          "silent_characters_none": "Any visible people stay silent unless the prompt explicitly says otherwise.",
+          "dialogue_named": "Use exactly this spoken line: \"{{dialogue}}\"",
+          "dialogue_none": "Use no spoken dialogue unless the motion direction explicitly requires it.",
+          "wrong_speaker_failsafe_named": "If the line cannot be cleanly assigned to {{speaker}}, output no audible dialogue instead.",
+          "wrong_speaker_failsafe_none": "Do not add random narration or a wrong speaking source.",
+          "staging_named": "Keep staging clear so {{speaker}} is the obvious readable source if speech occurs.",
+          "staging_none": "Keep the coding action, Git action, or interface beat visually clear and easy to read.",
+          "action_none": "Keep one dominant visible action.",
+          "ending": [
+            "Keep the scene legible on a phone screen.",
+            "Output a single finished video clip."
+          ]
+        }
+      },
+      "authoring_sections": [
+        {
+          "title": "Format Summary",
+          "instruction": "Describe the full six-beat montage, the educational angle, and why the result should feel like a crisp futuristic explainer instead of a vague cyberpunk mood reel.",
+          "required": true,
+          "min_words": 45
+        },
+        {
+          "title": "World Lock",
+          "instruction": "Define the neon city, workstation style, lighting palette, UI treatment, and sci-fi effects that stay consistent across the stitched clips.",
+          "required": true,
+          "min_words": 55
+        },
+        {
+          "title": "Learner Lock",
+          "instruction": "Define the recurring coder or learner identity, body language, wardrobe, and how the person interacts with AI and Git across the six beats.",
+          "required": true,
+          "min_words": 45
+        },
+        {
+          "title": "Sequence Logic",
+          "instruction": "Explain how the six clips connect, what each beat teaches, and how camera motion or transitions remain logically progressive across the montage.",
+          "required": true,
+          "min_words": 45
+        },
+        {
+          "title": "Asset Plan",
+          "instruction": "Record the scene start frames and any references needed before rendering. Note whether continuity is carried by shared world design, repeated protagonist identity, or specific saved frames.",
+          "required": true,
+          "min_words": 35
+        }
+      ],
+      "asset_contract": {
+        "requires_character_assets": false,
+        "requires_scene_start_frames": true,
+        "requires_saved_run_artifacts": true
+      },
+      "cast_contract": {
+        "requires_named_cast": false,
+        "requires_locked_wardrobe": true,
+        "requires_role_assignment": false,
+        "minimum_cast_size": 1,
+        "role_blueprint": []
+      },
+      "scene_contract": {
+        "default_story_beats": [
+          "future city hook",
+          "ai coding setup",
+          "first code build",
+          "git save point",
+          "branch commit push",
+          "futuristic payoff"
+        ],
+        "scene_prompt_strategy": "each clip should open on a continuity-locked futuristic frame and animate one clear coding or Git action with readable neon-city atmosphere"
+      },
+      "continuity_contract": {
+        "requires_continuity_anchors": true,
+        "preferred_reference_strategy": "shared_reference",
+        "priority_order": [
+          "protagonist identity",
+          "workstation and tool language",
+          "city-light palette and world style",
+          "camera logic and transition readability",
+          "UI and code-learning clarity",
+          "overall futuristic realism"
+        ]
+      },
+      "video_examples": [
+        "A strong beat should feel like a futuristic coding action, not an abstract VFX loop.",
+        "The protagonist, workstation, and city atmosphere should feel like the same world across all six clips.",
+        "Neon effects should support readability, not bury the educational idea."
+      ],
+      "dialogue_examples": [
+        "\"\""
+      ]
     }
   ]
 }

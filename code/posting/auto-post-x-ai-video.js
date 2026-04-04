@@ -30,6 +30,7 @@ import {
   extractXaiChatUsageMetadata,
   recordApiSpend,
 } from '../shared/api-spend-tracker.js';
+import { II_ROOT, ROOT_DIR } from '../core/paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(__dirname, '..', '..');
@@ -48,7 +49,7 @@ async function generateTweetCaption(video) {
   // Load caption file for context
   let captionContext = '';
   if (video.assets.caption_path) {
-    const captionFilePath = path.join(REPO_ROOT, video.assets.caption_path);
+    const captionFilePath = path.join(II_ROOT, video.assets.caption_path);
     if (fs.existsSync(captionFilePath)) {
       captionContext = fs.readFileSync(captionFilePath, 'utf-8').trim();
     }
@@ -160,7 +161,7 @@ async function main() {
   const prepared = prepareScheduledVideoForPlatform(item, PLATFORM);
   const videoFilePath = prepared.preparedVideoPath;
   if (!fs.existsSync(videoFilePath)) {
-    console.error(`File not found: ${path.relative(REPO_ROOT, videoFilePath)}`);
+    console.error(`File not found: ${path.relative(II_ROOT, videoFilePath)}`);
     process.exit(1);
   }
 

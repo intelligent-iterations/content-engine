@@ -335,9 +335,7 @@ async function finalizeSlides(processedSlides) {
  * Save images and metadata locally
  */
 function saveOutput(slides, content, options = {}) {
-  const outputRoot = process.env.OUTPUT_DIR
-    ? path.resolve(process.env.OUTPUT_DIR)
-    : CAROUSELS_DIR;
+  const outputRoot = CAROUSELS_DIR;
 
   const folderName = safeOutputName(options.outputName || options.templateId || content.topic, 'carousel');
   const folder = path.join(outputRoot, folderName);
