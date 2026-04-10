@@ -8,6 +8,7 @@ import { AUTH_DIR, ROOT_DIR, TEMP_DIR, isMainModule } from '../core/paths.js';
 import {
   applyCookiesFileToContext,
   applyStorageStateToContext,
+  ensureGrokStorageState,
   isChromeProfileLockError,
   makeTempChromeProfileDir
 } from '../shared/grok-browser-session.js';
@@ -20,9 +21,7 @@ const DEFAULT_DOWNLOAD_DIR = path.join(TEMP_DIR, 'grok');
 const DEFAULT_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile');
 const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000;
 const GROK_URL = 'https://grok.com/imagine';
-const DEFAULT_COOKIE_PATH_CANDIDATES = [
-  path.join(ROOT_DIR, 'cookies', 'x_cookies.json')
-];
+const DEFAULT_COOKIE_PATH_CANDIDATES = [];
 
 const PROMPT_SELECTOR_CANDIDATES = [
   'textarea[aria-label="Make a video"]',
@@ -86,6 +85,7 @@ Examples:
 }
 
 function parseArgs(argv) {
+  ensureGrokStorageState();
   const args = {
     statePath: DEFAULT_STATE_PATH,
     outDir: DEFAULT_DOWNLOAD_DIR,

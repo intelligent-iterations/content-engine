@@ -99,29 +99,7 @@ Important browser fallback note:
 
 ## Automated Posting Auth
 
-Posting automation uses platform cookies, not API tokens.
-
-Generate those cookies through the setup script:
-
-```bash
-npm run auth:posting
-```
-
-Or one platform at a time:
-
-```bash
-npm run auth:posting:tiktok
-npm run auth:posting:x
-npm run auth:posting:instagram
-```
-
-This writes cookie files under `cookies/`:
-
-- `cookies/tiktok_cookies.json`
-- `cookies/x_cookies.json`
-- `cookies/instagram_cookies.json`
-
-These cookies are distinct from Grok auth files under `auth/`.
+Posting auth (Instagram, TikTok, X cookies) lives in the social media poster package (`ii-social-media-poster-internal`), not here. See that package's `setup.py` for cookie capture and GitHub Secrets setup.
 
 ## Common Commands
 
@@ -137,16 +115,10 @@ Render a video from a saved markdown artifact:
 node code/cli/video.js "absurd fruit revenge story in a dessert banquet hall" --template anthropomorphic-fruit-revenge-drama --output-name fruit-revenge --md output/videos/fruit-revenge/fruit-revenge.md
 ```
 
-Export Grok cookies from Chrome:
+Export Grok cookies from Chrome and push to GitHub Secrets:
 
 ```bash
 npm run auth:grok
-```
-
-Set up posting cookies:
-
-```bash
-npm run auth:posting
 ```
 
 Build the local Docker images used by launchd/autopost:
@@ -163,9 +135,9 @@ npm run spend:report
 
 ## Summary
 
-- AI usage: either set `XAI_API_KEY` in `.env`, or provide `cookies/x_cookies.json` so the browser path can bootstrap `auth/grok-storage-state.json`, or log into grok.com in Chrome and run `npm run auth:grok`
+- AI usage: either set `XAI_API_KEY` in `.env`, or log into grok.com in Chrome and run `npm run auth:grok` to push Grok cookies to GitHub Secrets
 - Browser fallback still requires a session that can actually submit a generation job. If submit opens the `SuperGrok` subscribe modal, browser rendering is blocked for that session.
-- Automated posting: run the cookie setup script for each platform you want to post to
+- Automated posting: managed by `ii-social-media-poster-internal`, not this package
 - Saved videos go under `output/videos/<concept-slug>/`
 - Saved carousels go under `output/carousels/<concept-slug>/`
 - Scheduled auto-post queues live under `output/scheduled_videos/<slug>/` and `output/scheduled_carousels/<slug>/`

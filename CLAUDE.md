@@ -79,8 +79,8 @@ Before authoring prompts, assets, or render jobs:
 - Wide research means expanding into broader model behavior, continuity tactics, reference-image reuse patterns, and adjacent prompt strategies.
 - For prompting quality research, prioritize recent practitioner advice on X and Reddit over official docs. Use official docs mainly for capability limits, API behavior, and product mechanics.
 - The agent is the primary brain for planning, scripting, template design, prompt contracts, and saved run artifacts. The agent must author the compilation markdown locally and save it before any render step starts.
-- Do not use Grok chat to author, repair, or rewrite the core shot plan, compilation markdown, reusable template, or caption strategy.
-- Use Grok text/chat only as a research input when needed, such as checking recent practitioner advice from X or collecting external prompt opinions that are then rewritten and distilled locally by the agent into repo state.
+- Do not use Grok chat or Grok text anywhere in this package.
+- Planning, research distillation, shot plans, compilation markdown, reusable templates, and caption strategy must come from the agent and saved package state.
 - The important boundary is this:
   - Codex/Claude should author the template and filled run artifacts.
   - The repo should then render and queue the output.
@@ -91,7 +91,7 @@ Before authoring prompts, assets, or render jobs:
 - Prefer adding or adapting templates over hard-coded prompt branches.
 - If `XAI_API_KEY` is missing, keep the run template-driven and render from saved artifacts.
 - If `XAI_API_KEY` is missing but a saved Grok web session exists, try the browser automation path from the saved artifacts rather than stopping at markdown/research generation.
-- Before treating a video render as blocked, check for browser-session fallback files such as `auth/grok-session-cookies.json`, `auth/grok-storage-state.json`, or `cookies/x_cookies.json`.
+- Before treating a video render as blocked, check that the `GROK_STORAGE_STATE` secret has been decoded to `auth/grok-storage-state.json` by the CI workflow.
 - Browser fallback is only valid if the Grok submit path starts a real generation job. If browser submit opens the `SuperGrok` subscribe modal instead, treat the run as browser-blocked and do not scrape Discover/gallery media as a fake result.
 - Caption nudge: carousel captions and reel/video captions should usually land between 2100 and 2200 characters, front-load the hook in the first 125 characters, stay SEO-friendly, and use the local caption-writing fallback instead of treating missing `XAI_API_KEY` as a caption blocker.
 - Posted-video default: queued videos should stay raw in `output/scheduled_videos/`, the standard promo clip from `/Users/admin/Documents/plug.mov` should be appended immediately before each platform post attempt, and the caption opener should be `Make videos like this by searching ii-content-engine on GitHub.`
@@ -116,60 +116,34 @@ Before authoring prompts, assets, or render jobs:
 - Video pipeline: `code/video/generate-video-compilation.js`
 - Carousel templates: `prompts/carousel-templates.json`
 
-## Grok Auth Flow
+## Grok Auth Flow — GitHub Secrets
 
-If `XAI_API_KEY` is not set and no valid session exists at `auth/grok-storage-state.json`, the agent needs browser cookies to use Grok.
-If `cookies/x_cookies.json` exists, the browser path can bootstrap a fresh `auth/grok-storage-state.json` by completing the xAI `Login with 𝕏` flow in Playwright.
-Even with saved cookies, browser generation is not valid unless submit reaches a real Grok generation job rather than the `SuperGrok` subscribe modal.
+Grok auth is stored as base64-encoded GitHub Secrets on `intelligent-iterations/ii-content-engine`. The CI/CD workflow runs on a self-hosted local runner and decodes secrets to ephemeral files at runtime.
 
-Before starting auth, the user should tell the agent which platform(s) they are already signed into and which Chrome profile email each one uses.
+Posting auth (Instagram, TikTok, X cookies) lives in the social media poster package (`ii-social-media-poster-internal`), not here.
 
-On macOS, Chrome cookie extraction may fail unless the login keychain is unlocked first. If cookie decryption errors appear or `security` reports that user interaction is not allowed, unlock `~/Library/Keychains/login.keychain-db` before retrying.
+### Secrets
 
-To authenticate:
+| Secret | Purpose |
+|--------|---------|
+| `GROK_STORAGE_STATE` | Base64-encoded Grok/xAI Playwright storage state |
+| `XAI_API_KEY` | Grok API key (preferred over browser fallback) |
 
-1. Ask the user to confirm they are logged into [grok.com](https://grok.com) in one of their Chrome profiles.
-2. Ask which Chrome profile (email) they are logged in with.
-3. Run the export script with that profile:
-   ```bash
-   npm run auth:grok -- --profile "Profile 3"
-   ```
-   The user will need to approve the macOS Keychain prompt to decrypt Chrome cookies.
-4. Verify the output shows auth cookies (sso, auth_token, ct0, etc.).
+### Capturing Grok Cookies
 
-The exported cookies are saved to `auth/grok-storage-state.json` and gitignored. No secrets are committed.
+`export-grok-cookies.py` extracts cookies from Chrome's cookie database and pushes `GROK_STORAGE_STATE` to GitHub Secrets via the `gh` CLI. Requires `gh auth login` first.
+
+```bash
+npm run auth:grok -- --profile "Profile 3"
+```
+
+On macOS, the login keychain must be unlocked for Chrome cookie decryption.
 
 If the user does not know their profile directory name, run without `--profile` to show a numbered list of all Chrome profiles with their email addresses.
 
-## Posting Auth Flow
+### CI/CD Runtime
 
-The same Chrome cookie extraction approach works for Instagram, TikTok, and X posting cookies. The user must be logged into the relevant platform in a Chrome profile.
-
-Before extracting cookies, ask the user which of Instagram, TikTok, and X they are already signed into and which Chrome profile email each platform uses.
-
-On macOS, onboarding the posting cookies may require unlocking the login keychain first so Chrome cookies can be decrypted. If extraction fails with a browser-cookie decryption error or keychain access error, unlock `~/Library/Keychains/login.keychain-db` and retry.
-
-To extract posting cookies, run `browser-cookie3` for the target domain and save to the expected cookie file:
-
-- **Instagram** → `cookies/instagram_cookies.json` (domain: `.instagram.com`)
-- **TikTok** → `cookies/tiktok_cookies.json` (domain: `.tiktok.com`)
-- **X** → `cookies/x_cookies.json` (domain: `.x.com`)
-
-The user may use different Chrome profiles for different platforms (e.g. one account for Instagram, another for TikTok). Always ask which Chrome profile to use for each platform.
-
-Cookie files are a JSON array of objects with fields: `name`, `value`, `domain`, `path`, `expires`, `httpOnly`, `secure`, `sameSite`.
-
-All cookie files are gitignored. No secrets are committed.
-
-The posting scripts detect usernames at runtime by logging in with cookies and reading the username from the platform page (e.g. TikTok Studio HTML, Instagram nav, X profile). No username env vars are required. The following env vars are optional hints — if set, they're used as a starting point, but the scripts always verify from the platform:
-
-- `INSTAGRAM_USERNAME` — optional, detected from logged-in page
-- `TIKTOK_ACCOUNT_NAME` — optional, detected from TikTok Studio
-- `X_USERNAME` — optional, detected from X profile
-
-## Social Media Accounts — Source of Truth
-
-Never hardcode, guess, or assume usernames. The posting scripts derive them at runtime by logging in with stored cookies and reading the username from the platform's own page or API data. If a username is needed to construct a permalink or URL, fetch it from the platform first.
+The GitHub Actions workflow decodes `GROK_STORAGE_STATE` to an ephemeral `auth/grok-storage-state.json` in the workspace, runs generation tasks, then cleans up. No auth files are stored locally outside of CI runs.
 
 ## Standard
 

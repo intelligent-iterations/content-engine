@@ -8,6 +8,7 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import sharp from 'sharp';
 import { AUTH_DIR, ROOT_DIR, TEMP_DIR } from '../core/paths.js';
+import { ensureGrokStorageState } from './grok-browser-session.js';
 import {
   assertSpendWithinLimit,
   estimateXaiImageCost,
@@ -22,7 +23,6 @@ const RATE_LIMIT_WAIT = 5000; // 5 seconds between requests
 const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
-const DEFAULT_X_COOKIES_PATH = path.join(ROOT_DIR, 'cookies', 'x_cookies.json');
 const DEFAULT_BROWSER_IMAGE_DOWNLOAD_DIR = path.join(TEMP_DIR, 'grok-images');
 
 export const IMAGE_MODELS = {
@@ -404,12 +404,12 @@ async function generateImageWithGrok(apiKey, prompt, options = {}, retryCount = 
 }
 
 function resolveGrokWebSessionPath() {
+  ensureGrokStorageState();
   const candidates = [
     process.env.GROK_WEB_COOKIES_PATH,
     process.env.GROK_WEB_STATE_PATH,
     DEFAULT_GROK_STORAGE_PATH,
-    DEFAULT_GROK_COOKIES_PATH,
-    DEFAULT_X_COOKIES_PATH
+    DEFAULT_GROK_COOKIES_PATH
   ].filter(Boolean);
 
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;

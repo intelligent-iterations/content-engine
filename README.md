@@ -121,11 +121,11 @@ For continuity-sensitive story videos, the default chain is:
 
 There are two separate auth tracks:
 
-**Grok (generation)** — works with `XAI_API_KEY` in `.env` or via browser cookies extracted from Chrome (`npm run auth:grok`). Generation works without an API key.
+**Grok (generation)** — works with `XAI_API_KEY` in `.env` or via Grok browser cookies pushed to GitHub Secrets (`npm run auth:grok`). Generation works without an API key.
 
 When `XAI_API_KEY` is used, billable xAI calls are tracked under `output/tracking/`. Run `npm run spend:report` to inspect the current totals.
 
-**Platform posting** — requires saved cookies for each platform. Run `npm run auth:posting` (or platform-specific variants like `npm run auth:posting:tiktok`) to extract session cookies from Chrome.
+**Platform posting** — posting auth (Instagram, TikTok, X cookies) lives in the social media poster package (`ii-social-media-poster-internal`), not here.
 
 See [docs/INSTALLATION.md](docs/INSTALLATION.md) for the full setup guide.
 

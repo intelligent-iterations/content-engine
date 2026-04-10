@@ -5,6 +5,7 @@ import axios from 'axios';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { AUTH_DIR, ROOT_DIR, isMainModule } from '../core/paths.js';
+import { ensureGrokStorageState } from '../shared/grok-browser-session.js';
 import {
   buildVideoExecutionPlan,
   loadVideoExecutionPlan,
@@ -31,7 +32,6 @@ const BASE_URL = 'https://api.x.ai/v1';
 const DEFAULT_GROK_STORAGE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
 const DEFAULT_GROK_COOKIES_PATH = path.join(AUTH_DIR, 'grok-session-cookies.json');
 const DEFAULT_GROK_USER_DATA_DIR = path.join(AUTH_DIR, 'grok-chrome-profile-web-fallback');
-const DEFAULT_X_COOKIES_PATH = path.join(ROOT_DIR, 'cookies', 'x_cookies.json');
 
 function effectiveXaiApiKey() {
   return isBrowserOverrideEnabled() ? null : XAI_API_KEY;
@@ -105,12 +105,12 @@ export function parseCompilationMeta(filePath) {
 }
 
 function resolveGrokWebSessionPath() {
+  ensureGrokStorageState();
   const candidates = [
     process.env.GROK_WEB_COOKIES_PATH,
     process.env.GROK_WEB_STATE_PATH,
     DEFAULT_GROK_STORAGE_PATH,
-    DEFAULT_GROK_COOKIES_PATH,
-    DEFAULT_X_COOKIES_PATH
+    DEFAULT_GROK_COOKIES_PATH
   ].filter(Boolean);
 
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;

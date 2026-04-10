@@ -3,19 +3,19 @@
 import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
-import { applyCookiesFileToContext, applyStorageStateToContext } from '../shared/grok-browser-session.js';
+import { applyCookiesFileToContext, applyStorageStateToContext, ensureGrokStorageState } from '../shared/grok-browser-session.js';
 import { ensureAuthenticatedGrokSession } from '../shared/grok-web-auth.js';
 
 const OUTPUT_DIR = path.resolve('output/tmp/browser-submit-probe');
 const STATE_PATH = path.resolve('auth/grok-storage-state.json');
-const COOKIES_PATH = path.resolve('cookies/x_cookies.json');
 const USER_DATA_DIR = path.resolve('auth/grok-chrome-profile-web-fallback');
 
 function parseArgs(argv) {
+  ensureGrokStorageState();
   const args = {
     outputDir: OUTPUT_DIR,
     statePath: STATE_PATH,
-    cookiesPath: COOKIES_PATH,
+    cookiesPath: null,
     userDataDir: USER_DATA_DIR,
     usePersistent: false,
     useEnterSubmit: false,

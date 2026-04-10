@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """
-Extract Grok/X auth cookies directly from Chrome's cookie database.
+Extract Grok/X auth cookies directly from Chrome's cookie database and push
+them to GitHub Secrets.
 
 Uses browser-cookie3 to decrypt Chrome cookies without needing Chrome open.
 Lists Chrome profiles so you can pick the right one.
 """
 
 import argparse
+import base64
 import json
 import os
+import subprocess
 import sys
-import time
 
 CHROME_DIR = os.path.expanduser(
     "~/Library/Application Support/Google/Chrome"
 )
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
-AUTH_DIR = os.path.join(REPO_ROOT, "auth")
-DEFAULT_OUTPUT = os.path.join(AUTH_DIR, "grok-storage-state.json")
+GITHUB_REPO = "intelligent-iterations/ii-content-engine"
 
 COOKIE_DOMAINS = [".grok.com", ".x.com", ".x.ai", "accounts.x.ai"]
 AUTH_COOKIE_NAMES = [
@@ -133,15 +134,23 @@ def extract_cookies(profile_dir_name):
     return unique
 
 
-def save_storage_state(cookies, output_path):
-    """Save in the same format the repo already expects."""
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+def push_to_github_secret(cookies, secret_name="GROK_STORAGE_STATE"):
+    """Base64-encode storage state and push to GitHub Secrets."""
     state = {
         "cookies": cookies,
         "origins": [],
     }
-    with open(output_path, "w") as f:
-        json.dump(state, f, indent=2)
+    payload = json.dumps(state, indent=2)
+    encoded = base64.b64encode(payload.encode()).decode()
+    result = subprocess.run(
+        ["gh", "secret", "set", secret_name, "--repo", GITHUB_REPO, "--body", encoded],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"ERROR: Failed to set GitHub secret {secret_name}: {result.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Pushed {secret_name} to GitHub Secrets ({GITHUB_REPO})")
 
 
 def print_summary(cookies):
@@ -158,18 +167,19 @@ def print_summary(cookies):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract Grok auth cookies from Chrome"
+        description="Extract Grok auth cookies from Chrome and push to GitHub Secrets"
     )
     parser.add_argument(
         "--profile",
         help="Chrome profile directory name (e.g. 'Profile 3') to skip the prompt",
     )
-    parser.add_argument(
-        "--output",
-        default=DEFAULT_OUTPUT,
-        help=f"Output path (default: {DEFAULT_OUTPUT})",
-    )
     args = parser.parse_args()
+
+    # Verify gh CLI is available and authenticated
+    check = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+    if check.returncode != 0:
+        print("ERROR: gh CLI is not authenticated. Run: gh auth login", file=sys.stderr)
+        sys.exit(1)
 
     profiles = discover_profiles()
     if not profiles:
@@ -196,8 +206,7 @@ def main():
         print("ERROR: No cookies extracted. Is Chrome installed and has this profile been used?", file=sys.stderr)
         sys.exit(1)
 
-    save_storage_state(cookies, args.output)
-    print(f"Saved to {args.output}")
+    push_to_github_secret(cookies)
     print_summary(cookies)
 
 

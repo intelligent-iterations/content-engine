@@ -80,8 +80,8 @@ Before authoring prompts, assets, or render jobs:
 - Wide research means expanding from that niche into broader model tactics, continuity tactics, reference-image workflows, and adjacent successful formats.
 - For prompting quality research, prioritize recent practitioner advice on X and Reddit over official docs. Use official docs mainly for capability limits, API behavior, and product mechanics.
 - The agent is the primary brain for planning, scripting, template design, prompt contracts, and saved run artifacts. The agent must author the compilation markdown locally and save it under the run folder before rendering.
-- Do not use Grok text/chat to generate, repair, or rewrite the core shot plan, compilation markdown, caption strategy, or reusable template authoring.
-- Use Grok text/chat only as a research input when needed, such as checking recent practitioner advice from X or summarizing external prompt opinions that are then rewritten and distilled locally by the agent into repo state.
+- Do not use Grok chat or Grok text anywhere in this package.
+- Planning, research distillation, shot plans, compilation markdown, reusable templates, and caption strategy must come from the agent and saved package state.
 - The important boundary is this:
   - Codex/Claude should author the template and filled run artifacts.
   - The repo should then render and queue the output.

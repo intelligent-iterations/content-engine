@@ -42,7 +42,7 @@ function generateTestVideo(outputPath) {
 async function main() {
   if (!fs.existsSync(COOKIE_FILE)) {
     console.error('ERROR: TikTok cookies not found at', COOKIE_FILE);
-    console.error('Run `npm run auth:posting:tiktok` first.');
+    console.error('Posting cookies not found. Set up auth in ii-social-media-poster-internal.');
     process.exit(1);
   }
 

@@ -20,12 +20,9 @@ __pycache__/
 *.p12
 *.pfx
 
-# Session/Auth state
-auth/*
-!auth/.gitkeep
-cookies/*
-!cookies/.gitkeep
-TK_cookies*.json
+# Session/Auth state (ephemeral — created by CI from GitHub Secrets, never committed)
+auth/
+cookies/
 youtube_cookies.json
 .pinterest_profile/
 *_cookies.json

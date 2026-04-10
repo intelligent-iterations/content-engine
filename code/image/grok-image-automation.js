@@ -8,6 +8,7 @@ import { TEMP_DIR } from '../core/paths.js';
 import {
   applyCookiesFileToContext,
   applyStorageStateToContext,
+  ensureGrokStorageState,
   isChromeProfileLockError,
   makeTempChromeProfileDir,
   parseCookieFile
@@ -25,9 +26,7 @@ const MIN_IMAGE_DIMENSION = 768;
 const DEFAULT_RATE_LIMIT_WAIT_MS = 60000;
 const DEFAULT_MAX_RATE_LIMIT_RETRIES = 3;
 const GROK_URL = 'https://grok.com/imagine';
-const DEFAULT_COOKIE_PATH_CANDIDATES = [
-  path.join(PROJECT_ROOT, 'cookies', 'x_cookies.json')
-];
+const DEFAULT_COOKIE_PATH_CANDIDATES = [];
 
 const PROMPT_SELECTOR_CANDIDATES = [
   'textarea[aria-label="Make an image"]',
@@ -91,6 +90,7 @@ Examples:
 }
 
 function parseArgs(argv) {
+  ensureGrokStorageState();
   const args = {
     statePath: DEFAULT_STATE_PATH,
     outDir: DEFAULT_DOWNLOAD_DIR,

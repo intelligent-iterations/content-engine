@@ -1,6 +1,29 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { AUTH_DIR } from '../core/paths.js';
+
+const GROK_STORAGE_STATE_PATH = path.join(AUTH_DIR, 'grok-storage-state.json');
+
+/**
+ * Ensure grok-storage-state.json exists on disk. If it doesn't,
+ * decode from the GROK_STORAGE_STATE env var (base64-encoded GitHub Secret).
+ * Returns the file path if available, null otherwise.
+ */
+export function ensureGrokStorageState() {
+  if (fs.existsSync(GROK_STORAGE_STATE_PATH)) {
+    return GROK_STORAGE_STATE_PATH;
+  }
+
+  const b64 = process.env.GROK_STORAGE_STATE;
+  if (b64) {
+    fs.mkdirSync(AUTH_DIR, { recursive: true });
+    fs.writeFileSync(GROK_STORAGE_STATE_PATH, Buffer.from(b64, 'base64').toString('utf-8'));
+    return GROK_STORAGE_STATE_PATH;
+  }
+
+  return null;
+}
 
 export function parseCookieFile(rawJson) {
   const data = JSON.parse(rawJson);

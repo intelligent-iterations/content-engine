@@ -57,7 +57,7 @@ async function loadCookies(context) {
 
 export async function saveCookies(context) {
   const cookies = await context.cookies();
-  const filtered = cookies
+  return cookies
     .filter(cookie => String(cookie.domain || '').includes('instagram.com'))
     .map(cookie => ({
       name: cookie.name,
@@ -69,9 +69,6 @@ export async function saveCookies(context) {
       secure: cookie.secure,
       sameSite: cookie.sameSite,
     }));
-  fs.mkdirSync(path.dirname(COOKIE_FILE), { recursive: true });
-  fs.writeFileSync(COOKIE_FILE, JSON.stringify(filtered, null, 2));
-  return filtered;
 }
 
 export async function dismissInstagramPrompts(page) {

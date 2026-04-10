@@ -41,7 +41,7 @@ function generateTestVideo(outputPath) {
 async function main() {
   if (!fs.existsSync(COOKIE_FILE)) {
     console.error('ERROR: Instagram cookies not found at', COOKIE_FILE);
-    console.error('Run `npm run auth:posting:instagram` first.');
+    console.error('Posting cookies not found. Set up auth in ii-social-media-poster-internal.');
     process.exit(1);
   }
 

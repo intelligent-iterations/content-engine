@@ -77,7 +77,7 @@ async function loadCookies(context) {
 
 async function saveCookies(context) {
   const cookies = await context.cookies();
-  const filtered = cookies
+  return cookies
     .filter(c => String(c.domain || '').includes('tiktok.com'))
     .map(c => ({
       name: c.name,
@@ -89,9 +89,6 @@ async function saveCookies(context) {
       secure: c.secure,
       sameSite: c.sameSite,
     }));
-  fs.mkdirSync(path.dirname(COOKIE_FILE), { recursive: true });
-  fs.writeFileSync(COOKIE_FILE, JSON.stringify(filtered, null, 2));
-  return filtered;
 }
 
 // ---------------------------------------------------------------------------

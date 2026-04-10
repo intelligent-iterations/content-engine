@@ -26,7 +26,7 @@ const COOKIE_FILE = path.join(REPO_ROOT, 'cookies', 'x_cookies.json');
 async function main() {
   if (!fs.existsSync(COOKIE_FILE)) {
     console.error('ERROR: X cookies not found at', COOKIE_FILE);
-    console.error('Run `npm run auth:posting:x` first.');
+    console.error('Posting cookies not found. Set up auth in ii-social-media-poster-internal.');
     process.exit(1);
   }
 
